@@ -1177,6 +1177,8 @@ function tabs(defs) {
   function select(i, preset) {
     buttons.forEach((b, j) => b.classList.toggle("active", i === j));
     panel.replaceChildren(defs[i].render(preset));
+    // ページごとに背景モチーフの色味を変える（CSSの body[data-tab="n"] で受ける）
+    document.body.setAttribute("data-tab", String(i));
   }
   defs.forEach((d, i) => {
     const b = el("button", { class: "tab-btn", onclick: () => select(i) }, d.label);

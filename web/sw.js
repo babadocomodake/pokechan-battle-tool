@@ -2,9 +2,10 @@
 // 方針: アプリシェル（HTML/CSS/JS/アイコン）は cache-first。
 //       data/*.json は stale-while-revalidate（まずキャッシュを返し、裏で更新）。
 // キャッシュ名のバージョンを上げると古いキャッシュは activate で破棄される。
-const VERSION = "v5";
+const VERSION = "v7";
 const SHELL_CACHE = `pokechan-shell-${VERSION}`;
 const DATA_CACHE = `pokechan-data-${VERSION}`;
+const FONT_CACHE = `pokechan-font-${VERSION}`;
 
 // 事前キャッシュするアプリシェル（相対パス＝Pagesサブパスでも動く）
 const SHELL_ASSETS = [
@@ -14,6 +15,9 @@ const SHELL_ASSETS = [
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
+  "./icons/starter-252.png",
+  "./icons/starter-255.png",
+  "./icons/starter-258.png",
   "./js/app.js",
   "./js/data.js",
   "./js/favorites.js",
@@ -33,7 +37,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== SHELL_CACHE && k !== DATA_CACHE).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k !== SHELL_CACHE && k !== DATA_CACHE && k !== FONT_CACHE).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -42,6 +46,22 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
+
+  // Googleフォント（別オリジン）: 初回取得後はキャッシュ優先でオフラインでもドット表示を維持
+  if (url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com") {
+    event.respondWith(
+      caches.open(FONT_CACHE).then(async (cache) => {
+        const cached = await cache.match(req);
+        const network = fetch(req).then((res) => {
+          if (res && (res.ok || res.type === "opaque")) cache.put(req, res.clone());
+          return res;
+        }).catch(() => cached);
+        return cached || network;
+      })
+    );
+    return;
+  }
+
   // 同一オリジンのみ扱う（外部リンクは素通し）
   if (url.origin !== self.location.origin) return;
 

@@ -4,10 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>ポケチャン補助ツール（初心者向け）</title>
+  <!-- ドット（ピクセル）フォント：DotGothic16。初回のみネット取得し、以後は Service Worker がオフラインキャッシュ -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" />
   <link rel="stylesheet" href="./css/style.css" />
   <!-- PWA（ホーム追加・オフライン起動） -->
   <link rel="manifest" href="./manifest.webmanifest" />
-  <meta name="theme-color" content="#0f1320" />
+  <meta name="theme-color" content="#322a66" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -16,8 +20,31 @@
   <link rel="icon" type="image/png" href="./icons/icon-192.png" />
 </head>
 <body>
-  <header class="site-header">
-    <h1>ポケチャン補助ツール</h1>
+ <div class="gba">
+  <div class="gba-screen">
+   <header class="site-header">
+    <div class="header-mascots" aria-hidden="true">
+      <img class="mascot" src="./icons/starter-252.png" width="52" height="52" alt="" />
+      <img class="mascot" src="./icons/starter-255.png" width="52" height="52" alt="" />
+      <img class="mascot" src="./icons/starter-258.png" width="52" height="52" alt="" />
+    </div>
+    <div class="title-wrap">
+      <svg class="pokeball" viewBox="0 0 32 32" width="34" height="34" aria-hidden="true">
+        <circle cx="16" cy="16" r="14" fill="#fff" stroke="#181818" stroke-width="2.5"/>
+        <path d="M2 16 A14 14 0 0 1 30 16 Z" fill="#ee1c25"/>
+        <rect x="2" y="14" width="28" height="4" fill="#181818"/>
+        <circle cx="16" cy="16" r="4.6" fill="#fff" stroke="#181818" stroke-width="2.5"/>
+        <circle cx="16" cy="16" r="1.6" fill="#aab4cc"/>
+      </svg>
+      <h1>ポケチャン補助ツール</h1>
+      <svg class="pokeball" viewBox="0 0 32 32" width="34" height="34" aria-hidden="true">
+        <circle cx="16" cy="16" r="14" fill="#fff" stroke="#181818" stroke-width="2.5"/>
+        <path d="M2 16 A14 14 0 0 1 30 16 Z" fill="#ee1c25"/>
+        <rect x="2" y="14" width="28" height="4" fill="#181818"/>
+        <circle cx="16" cy="16" r="4.6" fill="#fff" stroke="#181818" stroke-width="2.5"/>
+        <circle cx="16" cy="16" r="1.6" fill="#aab4cc"/>
+      </svg>
+    </div>
     <p class="tagline">ダメージ計算・素早さ一覧・逆算（現レギュレーション同期）</p>
   </header>
 
@@ -41,6 +68,18 @@
       ゲームデータ: <a href="https://github.com/otterlyclueless/pokemon-champions-data" target="_blank" rel="noopener">Pokemon Champions Data</a>（CC BY 4.0）
     </p>
   </footer>
+  </div><!-- /.gba-screen -->
+
+  <!-- 実機装飾（PCのみ表示・情報ではないのでSRから除外）。十字キー/A・B/スピーカー/ロゴはCSS自作 -->
+  <div class="gba-deco" aria-hidden="true">
+    <span class="dpad"></span>
+    <span class="deco-center">
+      <span class="brand"><span class="power-led"></span>POK&Eacute;MON CHAMPIONS</span>
+      <span class="speaker"></span>
+    </span>
+    <span class="ab"><i>A</i><i>B</i></span>
+  </div>
+ </div><!-- /.gba -->
 
   <script type="module" src="./js/app.js"></script>
   <script>
