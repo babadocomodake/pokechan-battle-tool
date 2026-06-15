@@ -41,8 +41,24 @@ python3 -m http.server 8000
 ```
 ※ ESモジュールが `data/*.json` を読むため、`file://` ではなくサーバ経由で開くこと。
 
-### 3. 公開（任意）
-`web/` を GitHub Pages 等の静的ホスティングに置くだけ。
+### 3. 公開（GitHub Pages・自動デプロイ）
+このリポジトリは **GitHub Pages** で公開している。
+- 公開URL: **https://babadocomodake.github.io/pokechan-battle-tool/**（スマホのブラウザで開ける）
+- 仕組み: `main` に push すると [.github/workflows/deploy.yml](.github/workflows/deploy.yml) が走り、
+  `web/` フォルダを自動でPages公開する（フォルダ移動不要）。
+- 初回のみGitHub側で「Settings → Pages → Build and deployment = GitHub Actions」を有効化済み。
+
+### 4. 日々の開発フロー（git / GitHub）
+学習・不具合対応のため、変更は履歴を残しながら進める。
+```bash
+# 変更したら
+git add -A
+git commit -m "変更内容を日本語で簡潔に"
+git push                 # → 数十秒後に上記URLへ自動反映
+```
+- **元に戻したい**: `git log --oneline` で履歴確認 → `git revert <コミット>`（安全に取り消し）。
+- **動作確認はローカルで先に**: `cd web && python3 -m http.server 8000` → http://localhost:8000/ 。
+- 公開状況は GitHub の「Actions」タブで成功/失敗を確認できる。
 
 ## レギュレーション切替時の更新手順
 1. [公式最新情報](https://www.pokemonchampions.jp/ja/)とゲーム内で新しいレギュレーション番号・期間を確認。
