@@ -1,4 +1,4 @@
-// アプリ本体: タブ（素早さ一覧 / 流行り / ダメージ計算 / SP配分 / マイポケモン / 逆算）
+// アプリ本体: タブ（ダメージ計算 / 素早さ一覧 / 逆算 / 流行り / マイポケモン）
 import { loadData, store, getNature, attackingMovesFor, allMovesFor, byUsage } from "./data.js";
 import { calcStat, calcAllStats, STAT_KEYS, STAT_LABELS_JP, SP_MAX_PER_STAT, SP_TOTAL } from "./calc/stats.js";
 import { buildSpeedTable } from "./calc/speed.js";

@@ -161,12 +161,11 @@ details.more .dmg-grid { margin-top: 6px; }
 .roll-cell.ko small { color: var(--bad); }
 @media (max-width: 480px) { .roll-grid { grid-template-columns: repeat(4, 1fr); } }
 
-/* SP配分 */
+/* SP入力（ダメ計の「場の状態」・マイポケモンのSP合計表示で使用） */
 .sp-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 10px 0; }
 .sp-controls .field { min-width: 160px; }
 .total-badge { background: var(--surface-2); border: 1px solid var(--line); padding: 8px 12px; border-radius: 8px; font-weight: 700; font-size: .85rem; }
 .total-badge.over { background: var(--bad); color: #fff; }
-.sp-table td:nth-child(3) { width: 80px; }
 
 /* 最近使った（履歴）チップ。最大50件まで保存するため横スクロールで省スペースに。 */
 .recents { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; padding-bottom: 4px; max-width: 100%; }
