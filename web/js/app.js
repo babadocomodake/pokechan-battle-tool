@@ -388,6 +388,46 @@ function damageTab(preset) {
     }).filter(Boolean));
   }
 
+  // 使用率ランキング順のポケモン（攻守の「ランキングから選択」で共用）
+  const rankedList = store.legalPokemon.filter((p) => p.usageRankSingle)
+    .sort((a, b) => a.usageRankSingle - b.usageRankSingle || (a.form === "Mega") - (b.form === "Mega"));
+  function rankOptions(placeholder) {
+    return [el("option", { value: "" }, placeholder),
+      ...rankedList.map((p) => el("option", { value: p.name }, `#${p.usageRankSingle} ${p.nameJp}`))];
+  }
+
+  // 攻撃側: お気に入りから選択（型ごと反映）
+  const atkFavSel = el("select", { class: "item-select" });
+  function fillAtkFavSelect() {
+    const favs = loadFavorites();
+    atkFavSel.replaceChildren(
+      el("option", { value: "" }, favs.length ? "お気に入りから選択…" : "（お気に入り未登録）"),
+      ...favs.map((f) => {
+        const fp = store.pokemonByName.get(f.pokemon);
+        return el("option", { value: f.id }, `${f.label}${fp ? ` / ${fp.nameJp}` : ""}`);
+      }));
+  }
+  atkFavSel.addEventListener("change", () => {
+    const rec = loadFavorites().find((f) => f.id === atkFavSel.value);
+    if (rec) { applyAttackerPreset(rec); pushRecent(RECENT_ATK_KEY, attacker.name, RECENT_CAP); renderAtkRecents(); render(); }
+    atkFavSel.value = "";
+  });
+  // 攻撃側: ランキングから選択（名前のみ反映）
+  const atkRankPickSel = el("select", { class: "item-select" }, rankOptions("ランキングから選択…"));
+  atkRankPickSel.addEventListener("change", () => {
+    const nm = atkRankPickSel.value; if (!nm) return;
+    applyAttackerPreset({ pokemon: nm }); pushRecent(RECENT_ATK_KEY, nm, RECENT_CAP); renderAtkRecents(); render();
+    atkRankPickSel.value = "";
+  });
+  // 攻撃側: 現在の入力をマイポケモン（お気に入り）に登録（編集画面で仕上げ）
+  const atkSaveBtn = el("button", { type: "button", class: "mini", onclick: () => {
+    const move = store.movesByName.get(moveSel.value);
+    const atkKey = move && move.category === "Physical" ? "atk" : "spa";
+    const sp = emptySpread(); sp[atkKey] = clampSPVal(atkSP.value);
+    const itemJp = atkItemSel.disabled ? "" : (store.itemsByName.get(atkItemSel.value)?.nameJp || "");
+    nav.open(TAB.FAV, { newFrom: { pokemon: attacker.name, item: itemJp, moves: move ? [move.name] : [], sp } });
+  } }, "この攻撃をマイポケモンに登録");
+
   // 防御側
   const defSel = pokemonSelect((p) => { defender = p; pushRecent(RECENT_DEF_KEY, p.name, RECENT_CAP); renderRecents(); fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p); render(); }, "def-poke");
   const defRecents = el("div", { class: "recents" });
@@ -413,6 +453,15 @@ function damageTab(preset) {
   const defAbilSel = el("select", { class: "abil-select", onchange: render });
   const defItemSel = realItemSelect(render);
   const remainHp = el("input", { type: "number", min: "0", max: "100", value: "100", class: "sp-input", id: "def-remain" });
+  // 防御側: ランキングから選択（名前のみ反映）
+  const defRankPickSel = el("select", { class: "item-select" }, rankOptions("ランキングから選択…"));
+  defRankPickSel.addEventListener("change", () => {
+    const nm = defRankPickSel.value; if (!nm) return;
+    const p = store.pokemonByName.get(nm); if (!p) { defRankPickSel.value = ""; return; }
+    defSel.value = nm; defender = p; pushRecent(RECENT_DEF_KEY, nm, RECENT_CAP); renderRecents();
+    fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p); render();
+    defRankPickSel.value = "";
+  });
 
   // 場（共通）
   const weatherSel = fieldSelect(WEATHERS, render);
@@ -562,12 +611,15 @@ function damageTab(preset) {
     el("section", { class: "card" }, [
       el("h3", {}, "攻撃側"),
       labeled("ポケモン", atkSel),
+      el("div", { class: "fav-row2" }, [labeled("お気に入りから", atkFavSel), labeled("ランキングから", atkRankPickSel)]),
       el("div", { class: "field" }, [el("label", {}, "最近使った攻撃"), atkRecents]),
       labeled("わざ", moveSel),
+      el("div", { class: "fav-actions" }, [atkSaveBtn]),
     ]),
     el("section", { class: "card" }, [
       el("h3", {}, "防御側"),
       labeled("ポケモン", defSel),
+      labeled("ランキングから", defRankPickSel),
       el("div", { class: "field" }, [el("label", {}, "最近使った防御"), defRecents]),
     ]),
   ]);
@@ -630,6 +682,7 @@ function damageTab(preset) {
 
   refreshMoves();
   renderAtkRecents();
+  fillAtkFavSelect();
   renderRecents();
   fillAbilitySelect(atkAbilSel, attacker);
   fillAbilitySelect(defAbilSel, defender);
@@ -823,7 +876,7 @@ function moveOptionNodes(pokemon) {
   return nodes;
 }
 
-function favoritesTab() {
+function favoritesTab(preset) {
   const root = el("div", { class: "tab-panel" });
   let editing = null;       // 編集中レコードid（null=新規）
   let selPoke;
@@ -993,6 +1046,21 @@ function favoritesTab() {
   rebuildMoves();
   resetForm();
   renderList();
+
+  // ダメ計の「この攻撃をマイポケモンに登録」から渡された入力で新規登録フォームを下書き
+  if (preset?.newFrom) {
+    const nf = preset.newFrom;
+    if (nf.pokemon && store.pokemonByName.has(nf.pokemon)) {
+      pokeSel.value = nf.pokemon; selPoke = store.pokemonByName.get(nf.pokemon);
+      applyMegaItem(); rebuildMoves();
+    }
+    if (nf.item && !itemInput.readOnly) itemInput.value = nf.item;
+    if (nf.sp) for (const k of STAT_KEYS) { spState[k] = nf.sp[k] ?? 0; spInputs[k].value = String(spState[k]); }
+    if (nf.moves) moveSels.forEach((s, i) => { s.value = nf.moves[i] || ""; });
+    labelInput.value = `${selPoke.nameJp}（攻撃）`;
+    renderStats();
+    root.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   return root;
 }
 
