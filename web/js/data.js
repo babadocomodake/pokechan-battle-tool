@@ -15,6 +15,7 @@ export const store = {
   typechart: null,
   items: [],
   itemsByName: new Map(),
+  legalItems: new Set(),   // 現レギュ合法アイテムの英語名（regulation.rules.legal_items）
   abilities: [],
   learnsets: {},       // { ポケモン名: [覚える技名,...] }
   usage: null,         // { season, single:[{rank,name}], double:[...] }
@@ -49,6 +50,8 @@ export async function loadData(base = "./data") {
   store.typechart = typechart;
   store.items = items;
   store.itemsByName = new Map(items.map((it) => [it.name, it]));
+  // 合法アイテム集合（未定義の旧データなら空＝フィルタ実質無効でフォールバック）
+  store.legalItems = new Set(regulation?.rules?.legal_items || []);
   store.abilities = abilities;
   store.learnsets = learnsets;
   store.usage = usage;

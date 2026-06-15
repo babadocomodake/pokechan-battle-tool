@@ -1,6 +1,9 @@
 # データ取得キャッシュ（再生成可能）
 data/raw/
 
+# 公開物の生成データ（data/ が単一ソース。公開時はCIが data/→web/data/ を同梱）
+web/data/
+
 # Python
 __pycache__/
 *.pyc
@@ -8,6 +11,8 @@ __pycache__/
 # Playwright / 検証用スクショ
 .playwright-mcp/
 *.png
+# ただしPWAアイコンは追跡する
+!web/icons/*.png
 
 # OS
 .DS_Store

@@ -58,3 +58,25 @@ export function pushRecent(key, value, cap = 8) {
   localStorage.setItem(key, JSON.stringify(trimmed));
   return trimmed;
 }
+// 履歴の各要素は「文字列(旧:名前のみ)」または「{pokemon, ...}スナップショット」。
+const recentName = (x) => (typeof x === "string" ? x : x && x.pokemon);
+// スナップショットをポケモン名で重複排除して先頭に積む（防御履歴用）。
+export function upsertRecentSnap(key, snap, cap = 50) {
+  const a = loadRecent(key).filter((x) => recentName(x) !== snap.pokemon);
+  a.unshift(snap);
+  const trimmed = a.slice(0, cap);
+  localStorage.setItem(key, JSON.stringify(trimmed));
+  return trimmed;
+}
+// 先頭が同じポケモンの時だけスナップショットを上書き（並びは変えない）。
+// 入力を編集するたびに「実際に使った状態」を先頭履歴へ反映するのに使う。
+// 実際に内容が変わった時だけ true を返す（呼び出し側はその時だけ再描画すればよい）。
+export function syncRecentSnapFront(key, snap) {
+  const a = loadRecent(key);
+  if (a.length && recentName(a[0]) === snap.pokemon && JSON.stringify(a[0]) !== JSON.stringify(snap)) {
+    a[0] = snap;
+    localStorage.setItem(key, JSON.stringify(a));
+    return true;
+  }
+  return false;
+}

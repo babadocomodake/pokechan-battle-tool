@@ -1,0 +1,17 @@
+{
+  "name": "ポケチャン補助ツール",
+  "short_name": "ポケチャン",
+  "description": "Pokémon Champions 初心者向け対戦支援ツール（素早さ/流行り/ダメ計/SP配分/逆算）",
+  "lang": "ja",
+  "start_url": ".",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1320",
+  "theme_color": "#0f1320",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

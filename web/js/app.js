@@ -1,20 +1,23 @@
-// アプリ本体: タブ（素早さ一覧 / 流行り / ダメージ計算 / SP配分 / マイポケモン / 逆算）
+// アプリ本体: タブ（ダメージ計算 / 素早さ一覧 / 逆算 / 流行り / マイポケモン）
 import { loadData, store, getNature, attackingMovesFor, allMovesFor, byUsage } from "./data.js";
-import { calcStat, calcAllStats, STAT_KEYS, STAT_LABELS_JP, SP_MAX_PER_STAT, SP_TOTAL, spTotal } from "./calc/stats.js";
+import { calcStat, calcAllStats, STAT_KEYS, STAT_LABELS_JP, SP_MAX_PER_STAT, SP_TOTAL } from "./calc/stats.js";
 import { buildSpeedTable } from "./calc/speed.js";
 import { statStageMultiplier } from "./calc/stages.js";
 import { computeDamage, typeEffectiveness, stabMultiplier, summarize } from "./calc/damage.js";
 import {
   WEATHERS, TERRAINS, SCREENS, weatherDamageMult, weatherDefStatMult,
-  terrainDamageMult, screenMult, abilityMods, itemMods, isAbilitySupported,
+  terrainDamageMult, screenMult, abilityMods, itemMods, isAbilitySupported, itemRole,
 } from "./calc/modifiers.js";
-import { loadFavorites, upsertFavorite, removeFavorite, genId, emptySpread, loadRecent, pushRecent } from "./favorites.js";
+import { loadFavorites, upsertFavorite, removeFavorite, genId, emptySpread, loadRecent, pushRecent, upsertRecentSnap, syncRecentSnapFront } from "./favorites.js";
 
 const RECENT_DEF_KEY = "pokechamp.recentDefenders.v1";
+const RECENT_ATK_KEY = "pokechamp.recentAttackers.v1";
+const RECENT_CAP = 50; // 履歴の保存件数
 
 // タブのインデックスと、お気に入りから他タブを開くためのコントローラ
 // （tabs() に渡す配列の並びと必ず一致させること）
-const TAB = { SPEED: 0, USAGE: 1, DAMAGE: 2, SP: 3, FAV: 4, REVERSE: 5 };
+// タブ並びは「対戦中によく使う順」（ダメ計→素早さ→逆算→準備系）。indexはmain()のtabs配列と一致させること。
+const TAB = { DAMAGE: 0, SPEED: 1, REVERSE: 2, USAGE: 3, FAV: 4 };
 const nav = { open(_i, _preset) {} };
 
 // 性格の日本語名
@@ -50,6 +53,26 @@ function el(tag, props = {}, children = []) {
 function typeBadges(types) {
   return el("span", { class: "types" }, types.map((t) =>
     el("span", { class: `type type-${t.toLowerCase()}` }, TYPE_JP[t] || t)));
+}
+// タイプ絞り込みチップ（複数選択OR）。対戦に無い「ステラ」は除外。
+// 返り値 { node, matches(types) }。onChange は選択が変わるたびに呼ばれる。
+function typeFilterChips(onChange) {
+  const types = (store.typechart?.types || []).filter((t) => t !== "Stellar");
+  const selected = new Set();
+  const chips = types.map((t) =>
+    el("button", { type: "button", class: `type type-${t.toLowerCase()} type-chip`, "aria-pressed": "false",
+      onclick: (e) => {
+        if (selected.has(t)) selected.delete(t); else selected.add(t);
+        e.currentTarget.setAttribute("aria-pressed", selected.has(t) ? "true" : "false");
+        onChange();
+      } }, TYPE_JP[t] || t));
+  const clear = el("button", { type: "button", class: "chip-btn type-chip-clear",
+    onclick: () => { selected.clear(); chips.forEach((c) => c.setAttribute("aria-pressed", "false")); onChange(); } }, "クリア");
+  const node = el("div", { class: "type-chips" }, [
+    el("span", { class: "type-chips-label" }, "タイプ:"), ...chips, clear,
+  ]);
+  // 選択が空なら全件通過。dual-type は「いずれか一致」で通す（OR）。
+  return { node, matches: (typeList) => selected.size === 0 || (typeList || []).some((t) => selected.has(t)) };
 }
 // 検索用の正規化: NFKC（全角→半角）→小文字→ひらがなをカタカナへ。
 // これで「りざ」「リザ」「riza」いずれでも部分一致できる。
@@ -142,6 +165,8 @@ function speedTab() {
   const search = el("input", { type: "search", placeholder: "ポケモン名で絞り込み（日本語/英語）", class: "search",
     oninput: (e) => { query = e.target.value.trim(); render(); } });
 
+  const typeChips = typeFilterChips(() => render());
+
   // すばやさ段階（0〜+6）
   const stageSel = el("select", { class: "stage-select",
     onchange: (e) => { mods.stage = parseInt(e.target.value, 10) || 0; render(); } },
@@ -161,6 +186,7 @@ function speedTab() {
   function render() {
     let rows = buildSpeedTable(store.legalPokemon, mods);
     if (query) rows = rows.filter((r) => pokeMatches(r, query));
+    rows = rows.filter((r) => typeChips.matches(r.types));
     const table = el("table", { class: "data-table" }, [
       el("thead", {}, el("tr", {}, [
         el("th", {}, "#"), el("th", {}, "ポケモン"), el("th", {}, "タイプ"),
@@ -184,7 +210,7 @@ function speedTab() {
 
   root.append(
     el("p", { class: "hint" }, "Lv50・個体値31固定。最速=SP32+性格補正↑、準速=SP32無補正、無振り=SP0。補正は表全体に適用（こだわりスカーフはメガには無効）。"),
-    search, toggles, tableWrap
+    search, typeChips.node, toggles, tableWrap
   );
   render();
   return root;
@@ -206,11 +232,13 @@ function usageTab() {
   const search = el("input", { type: "search", placeholder: "🔍 ひらがな/カタカナ/英字で絞り込み", class: "search",
     oninput: (e) => { query = e.target.value.trim(); render(); } });
 
+  const typeChips = typeFilterChips(() => render());
+
   const generalWrap = el("div", { class: "table-wrap" });
   const megaWrap = el("div", { class: "table-wrap" });
 
   function buildTable(list) {
-    const rows = query ? list.filter((p) => pokeMatches(p, query)) : list;
+    const rows = list.filter((p) => pokeMatches(p, query) && typeChips.matches(p.types));
     if (!rows.length) return el("p", { class: "hint" }, "該当なし");
     return el("table", { class: "data-table" }, [
       el("thead", {}, el("tr", {}, [
@@ -237,7 +265,7 @@ function usageTab() {
 
   root.append(
     el("p", { class: "hint" }, `出典: バトルデータベース（シングル・シーズン${store.usage?.season || store.regulation?.season || ""}）。使用率の高い順。各行「ダメ計で使う」で攻撃側に反映。`),
-    search,
+    search, typeChips.node,
     el("h3", { class: "fav-list-title" }, "一般ポケモン ランキング"),
     generalWrap,
     el("h3", { class: "fav-list-title" }, "メガシンカ ランキング"),
@@ -274,15 +302,27 @@ function spInput(initial, id) {
 function clampSPVal(v) { return Math.max(0, Math.min(SP_MAX_PER_STAT, parseInt(v || "0", 10) || 0)); }
 function itemObj(name) { return name ? store.itemsByName.get(name) || null : null; }
 
-// 持てる対戦アイテム（メガストーン除外）を日本語名順に。お気に入りと同じ選別。
+// 現レギュ合法か（regulation の legal_items 集合で判定。空ならフォールバックで全許可）。
+function isItemLegal(it) {
+  return store.legalItems.size === 0 || store.legalItems.has(it.name);
+}
+// 持てる対戦アイテム（メガストーン除外・現レギュ合法のみ）を日本語名順に。
 function holdableItems() {
   return store.items
-    .filter((it) => it.holdable && it.category !== "mega-stones" && it.nameJp && it.nameJp !== it.name)
+    .filter((it) => it.holdable && it.category !== "mega-stones" && it.nameJp && it.nameJp !== it.name && isItemLegal(it))
     .sort((a, b) => a.nameJp.localeCompare(b.nameJp, "ja"));
 }
-function realItemSelect(onChange) {
+// 役割が一致する道具だけ（side="atk"=威力関連 / "def"=防御関連）。効果文付きで返す。
+function roleItems(side) {
+  return holdableItems().filter((it) => itemRole(it)[side]);
+}
+// ダメ計用の持ち物セレクト。side で攻/防の効果あり道具のみに絞り、効果文を併記する。
+function realItemSelect(side, onChange) {
   const opts = [el("option", { value: "" }, "道具なし"),
-    ...holdableItems().map((it) => el("option", { value: it.name }, it.nameJp))];
+    ...roleItems(side).map((it) => {
+      const r = itemRole(it);
+      return el("option", { value: it.name }, r.jp ? `${it.nameJp}（${r.jp}）` : it.nameJp);
+    })];
   return el("select", { class: "item-select", onchange: onChange }, opts);
 }
 // ランク補正セレクト(+6〜-6)
@@ -317,15 +357,19 @@ function computeOne(attacker, defender, move, cond) {
   const eff = typeEffectiveness(move.type, defender.types, store.typechart.chart);
 
   let atkStat = calcStat(attacker.base[atkKey], cond.atkSP, atkKey, cond.atkNat);
-  let defStat = calcStat(defender.base[defKey], cond.defSP, defKey, cond.defNat);
+  // 防御は B(防御)/D(特防) を分けて持てる。技の物理/特殊で当たる方を使う。
+  // 逆算タブ等は単一値 cond.defSP/defNat を渡すので、それがあれば優先（後方互換）。
+  const defInvest = cond.defSP != null ? cond.defSP : (physical ? cond.defBsp : cond.defDsp) || 0;
+  const defNat = cond.defNat != null ? cond.defNat : (physical ? cond.defBnat : cond.defDnat) || 1.0;
+  let defStat = calcStat(defender.base[defKey], defInvest, defKey, defNat);
   const maxHp = calcStat(defender.base.hp, cond.defHpSP, "hp", 1.0);
 
   const ctx = {
     physical, moveType: move.type, moveName: move.name, attackerName: attacker.name,
     typeEff: eff, defenderFullHp: cond.remainPct >= 100, basePower: move.power,
   };
-  const aA = abilityMods(cond.atkAbility, ctx);
-  const dA = abilityMods(cond.defAbility, ctx);
+  const aA = abilityMods(cond.atkAbility, "atk", ctx); // 攻撃欄＝攻撃用の効果のみ
+  const dA = abilityMods(cond.defAbility, "def", ctx); // 防御欄＝防御用の効果のみ
   const aI = itemMods(cond.atkItem, ctx);
   const dI = itemMods(cond.defItem, ctx);
 
@@ -363,39 +407,147 @@ function damageTab(preset) {
   let attacker, defender;
 
   // 攻撃側
-  const atkSel = pokemonSelect((p) => { attacker = p; refreshMoves(); fillAbilitySelect(atkAbilSel, p); applyMega(atkItemSel, p); render(); }, "atk-poke");
+  const atkSel = pokemonSelect((p) => { attacker = p; pushRecent(RECENT_ATK_KEY, p.name, RECENT_CAP); renderAtkRecents(); refreshMoves(); fillAbilitySelect(atkAbilSel, p); applyMega(atkItemSel, p); render(); }, "atk-poke");
   const moveSel = el("select", { class: "move-select", onchange: render });
   const atkSP = spInput(SP_MAX_PER_STAT, "atk-sp");
   const atkNature = natureTriToggle("up");
   const atkRankSel = rankSelect(render);
   const atkAbilSel = el("select", { class: "abil-select", onchange: render });
-  const atkItemSel = realItemSelect(render);
-
-  // 防御側
-  const defSel = pokemonSelect((p) => { defender = p; pushRecent(RECENT_DEF_KEY, p.name); renderRecents(); fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p); render(); }, "def-poke");
-  const defRecents = el("div", { class: "recents" });
-  function renderRecents() {
-    const names = loadRecent(RECENT_DEF_KEY);
+  const atkItemSel = realItemSelect("atk", render);
+  const atkRecents = el("div", { class: "recents" });
+  function renderAtkRecents() {
+    const names = loadRecent(RECENT_ATK_KEY);
     if (!names.length) {
-      defRecents.replaceChildren(el("span", { class: "dim recents-empty" }, "（最近使った防御ポケモンがここに出ます）"));
+      atkRecents.replaceChildren(el("span", { class: "dim recents-empty" }, "（最近使った攻撃ポケモンがここに出ます）"));
       return;
     }
-    defRecents.replaceChildren(...names.map((nm) => {
+    atkRecents.replaceChildren(...names.map((nm) => {
       const p = store.pokemonByName.get(nm);
       if (!p) return null;
       return el("button", { type: "button", class: "chip-btn",
-        onclick: () => { defSel.value = nm; defender = p; pushRecent(RECENT_DEF_KEY, nm); renderRecents(); fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p); render(); } }, p.nameJp);
+        onclick: () => { atkSel.value = nm; attacker = p; pushRecent(RECENT_ATK_KEY, nm, RECENT_CAP); renderAtkRecents(); refreshMoves(); fillAbilitySelect(atkAbilSel, p); applyMega(atkItemSel, p); render(); } }, p.nameJp);
+    }).filter(Boolean));
+  }
+
+  // 使用率ランキング順のポケモン（攻守の「ランキングから選択」で共用）
+  const rankedList = store.legalPokemon.filter((p) => p.usageRankSingle)
+    .sort((a, b) => a.usageRankSingle - b.usageRankSingle || (a.form === "Mega") - (b.form === "Mega"));
+  function rankOptions(placeholder) {
+    return [el("option", { value: "" }, placeholder),
+      ...rankedList.map((p) => el("option", { value: p.name }, `#${p.usageRankSingle} ${p.nameJp}`))];
+  }
+
+  // 攻撃側: お気に入りから選択（型ごと反映）
+  const atkFavSel = el("select", { class: "item-select" });
+  function fillAtkFavSelect() {
+    const favs = loadFavorites();
+    atkFavSel.replaceChildren(
+      el("option", { value: "" }, favs.length ? "お気に入りから選択…" : "（お気に入り未登録）"),
+      ...favs.map((f) => {
+        const fp = store.pokemonByName.get(f.pokemon);
+        return el("option", { value: f.id }, `${f.label}${fp ? ` / ${fp.nameJp}` : ""}`);
+      }));
+  }
+  atkFavSel.addEventListener("change", () => {
+    const rec = loadFavorites().find((f) => f.id === atkFavSel.value);
+    if (rec) { applyAttackerPreset(rec); pushRecent(RECENT_ATK_KEY, attacker.name, RECENT_CAP); renderAtkRecents(); render(); }
+    atkFavSel.value = "";
+  });
+  // 攻撃側: ランキングから選択（名前のみ反映）
+  const atkRankPickSel = el("select", { class: "item-select" }, rankOptions("ランキングから選択…"));
+  atkRankPickSel.addEventListener("change", () => {
+    const nm = atkRankPickSel.value; if (!nm) return;
+    applyAttackerPreset({ pokemon: nm }); pushRecent(RECENT_ATK_KEY, nm, RECENT_CAP); renderAtkRecents(); render();
+    atkRankPickSel.value = "";
+  });
+  // 攻撃側: 現在の入力をマイポケモン（お気に入り）に登録（編集画面で仕上げ）
+  const atkSaveBtn = el("button", { type: "button", class: "mini", onclick: () => {
+    const move = store.movesByName.get(moveSel.value);
+    const atkKey = move && move.category === "Physical" ? "atk" : "spa";
+    const sp = emptySpread(); sp[atkKey] = clampSPVal(atkSP.value);
+    const itemJp = atkItemSel.disabled ? "" : (store.itemsByName.get(atkItemSel.value)?.nameJp || "");
+    nav.open(TAB.FAV, { newFrom: { pokemon: attacker.name, item: itemJp, moves: move ? [move.name] : [], sp } });
+  } }, "この攻撃をマイポケモンに登録");
+
+  // 防御側
+  const defSel = pokemonSelect((p) => commitDefenderSelection(p), "def-poke");
+  const defRecents = el("div", { class: "recents" });
+  // 履歴要素(旧:文字列 / 新:スナップショット)を正規化。
+  function asSnap(x) { return typeof x === "string" ? { pokemon: x } : (x || {}); }
+  // 防御側の現在設定をスナップショット化（SP/性格/持ち物/特性）。
+  function defSnapshot() {
+    const natState = (m) => (m > 1 ? "up" : m < 1 ? "down" : "neutral");
+    return {
+      pokemon: defender.name,
+      hpSp: clampSPVal(defHpSP.value), bSp: clampSPVal(defBSP.value), dSp: clampSPVal(defDSP.value),
+      natB: natState(defNatB.get()), natD: natState(defNatD.get()),
+      item: defItemSel.disabled ? "" : (defItemSel.value || ""), ability: defAbilSel.value || "",
+    };
+  }
+  // 新規に防御ポケモンを確定。特性/持ち物はリセット、SP/性格は引き継ぎ、履歴先頭へ。
+  function commitDefenderSelection(p) {
+    defender = p; defSel.value = p.name;
+    fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p);
+    upsertRecentSnap(RECENT_DEF_KEY, defSnapshot(), RECENT_CAP);
+    renderRecents(); render();
+  }
+  // 履歴スナップショットを防御側にまるごと復元。
+  function restoreDefenderSnapshot(e) {
+    const s = asSnap(e);
+    const p = store.pokemonByName.get(s.pokemon); if (!p) return;
+    defender = p; defSel.value = p.name;
+    defHpSP.value = String(s.hpSp ?? 0); defBSP.value = String(s.bSp ?? 0); defDSP.value = String(s.dSp ?? 0);
+    defNatB.set(s.natB || "neutral"); defNatD.set(s.natD || "neutral");
+    fillAbilitySelect(defAbilSel, p); defAbilSel.value = s.ability || "";
+    applyMega(defItemSel, p);
+    if (s.item) { defItemSel.value = s.item; if (defItemSel.value !== s.item) defItemSel.value = ""; }
+    upsertRecentSnap(RECENT_DEF_KEY, defSnapshot(), RECENT_CAP);
+    renderRecents(); render();
+  }
+  // 履歴チップの詳細行（SP/性格/持ち物/特性の要約）。旧データ(名前のみ)は空。
+  function defSnapSummary(s, p) {
+    if (s.hpSp == null && s.bSp == null && s.dSp == null && !s.item && !s.ability) return "";
+    const arrow = (v) => (v === "up" ? "↑" : v === "down" ? "↓" : "");
+    const parts = [`H${s.hpSp || 0} B${s.bSp || 0}${arrow(s.natB)} D${s.dSp || 0}${arrow(s.natD)}`];
+    if (s.ability && p) { const i = (p.abilities || []).indexOf(s.ability); parts.push(i >= 0 ? (p.abilitiesJp?.[i] || s.ability) : s.ability); }
+    if (s.item) parts.push(store.itemsByName.get(s.item)?.nameJp || s.item);
+    return parts.join(" / ");
+  }
+  function renderRecents() {
+    const entries = loadRecent(RECENT_DEF_KEY);
+    if (!entries.length) {
+      defRecents.replaceChildren(el("span", { class: "dim recents-empty" }, "（最近使った防御ポケモンがここに出ます）"));
+      return;
+    }
+    defRecents.replaceChildren(...entries.map((e) => {
+      const s = asSnap(e);
+      const p = store.pokemonByName.get(s.pokemon);
+      if (!p) return null;
+      const summary = defSnapSummary(s, p);
+      return el("button", { type: "button", class: "chip-btn chip-snap", title: summary ? `${p.nameJp} ／ ${summary}` : p.nameJp,
+        onclick: () => restoreDefenderSnapshot(s) },
+        [el("span", { class: "chip-name" }, p.nameJp), summary ? el("small", { class: "chip-sub" }, summary) : null].filter(Boolean));
     }).filter(Boolean));
   }
   attacker = store.pokemonByName.get(atkSel.value);
   defender = store.pokemonByName.get(defSel.value);
   const defHpSP = spInput(0, "def-hp-sp");
-  const defDefSP = spInput(0, "def-def-sp");
-  const defNature = natureTriToggle("neutral");
+  const defBSP = spInput(0, "def-b-sp");   // 防御(B)への努力値
+  const defDSP = spInput(0, "def-d-sp");   // 特防(D)への努力値
+  const defNatB = natureTriToggle("neutral"); // 防御の性格補正
+  const defNatD = natureTriToggle("neutral"); // 特防の性格補正
   const defRankSel = rankSelect(render);
   const defAbilSel = el("select", { class: "abil-select", onchange: render });
-  const defItemSel = realItemSelect(render);
+  const defItemSel = realItemSelect("def", render);
   const remainHp = el("input", { type: "number", min: "0", max: "100", value: "100", class: "sp-input", id: "def-remain" });
+  // 防御側: ランキングから選択（名前のみ反映）
+  const defRankPickSel = el("select", { class: "item-select" }, rankOptions("ランキングから選択…"));
+  defRankPickSel.addEventListener("change", () => {
+    const nm = defRankPickSel.value; if (!nm) return;
+    const p = store.pokemonByName.get(nm); if (!p) { defRankPickSel.value = ""; return; }
+    commitDefenderSelection(p);
+    defRankPickSel.value = "";
+  });
 
   // 場（共通）
   const weatherSel = fieldSelect(WEATHERS, render);
@@ -406,10 +558,13 @@ function damageTab(preset) {
   const cbCrit = el("input", { type: "checkbox", onchange: render });
   const cbBurn = el("input", { type: "checkbox", onchange: render });
   const cbAll = el("input", { type: "checkbox", onchange: render });
+  // 全技ダメ計のとき、技を「そのタイプ」で絞り込むチップ（複数選択OR）
+  const allTypeChips = typeFilterChips(render);
 
-  [atkSP, defHpSP, defDefSP, remainHp].forEach((i) => i.addEventListener("input", render));
+  [atkSP, defHpSP, defBSP, defDSP, remainHp].forEach((i) => i.addEventListener("input", render));
   atkNature.addEventListener("trichange", render);
-  defNature.addEventListener("trichange", render);
+  defNatB.addEventListener("trichange", render);
+  defNatD.addEventListener("trichange", render);
 
   const result = el("div", { class: "dmg-result" });
 
@@ -447,7 +602,10 @@ function damageTab(preset) {
   function gatherCond() {
     return {
       atkSP: clampSPVal(atkSP.value), atkNat: atkNature.get(),
-      defSP: clampSPVal(defDefSP.value), defNat: defNature.get(), defHpSP: clampSPVal(defHpSP.value),
+      // 防御は B/D 別々に渡す。computeOne が技の物理/特殊で当たる方を使う。
+      defBsp: clampSPVal(defBSP.value), defBnat: defNatB.get(),
+      defDsp: clampSPVal(defDSP.value), defDnat: defNatD.get(),
+      defHpSP: clampSPVal(defHpSP.value),
       atkRank: parseInt(atkRankSel.value, 10) || 0, defRank: parseInt(defRankSel.value, 10) || 0,
       atkAbility: atkAbilSel.value, defAbility: defAbilSel.value,
       atkItem: itemObj(atkItemSel.value), defItem: itemObj(defItemSel.value),
@@ -462,6 +620,9 @@ function damageTab(preset) {
   }
 
   function render() {
+    // 防御履歴の先頭が現在の防御ポケモンなら、編集中の設定を逐次反映（実際に使った状態を保存）。
+    // 内容が変わった時だけチップを再描画して、表示と復元データを最新に保つ。
+    if (syncRecentSnapFront(RECENT_DEF_KEY, defSnapshot())) renderRecents();
     const cond = gatherCond();
     if (cbAll.checked) return renderAll(cond);
     const move = store.movesByName.get(moveSel.value);
@@ -469,20 +630,33 @@ function damageTab(preset) {
     const r = computeOne(attacker, defender, move, cond);
     const s = r.summary;
     const curHp = Math.max(1, Math.floor(r.maxHp * cond.remainPct / 100));
-    result.replaceChildren(
+    result.replaceChildren(el("div", {}, [
+      verdictBadge(r, curHp),
       el("div", { class: "dmg-headline" }, [
         el("span", { class: "dmg-num" }, `${s.min}〜${s.max}`),
         el("span", { class: "dmg-pct" }, `相手のHPを ${s.pctMin.toFixed(1)}〜${s.pctMax.toFixed(1)}% 削る`),
       ]),
-      el("div", { class: "dmg-ko " + (s.guaranteed === 1 ? "ko" : "") }, s.label),
       el("div", { class: "dmg-detail" }, [
         `${attacker.nameJp} の ${move.nameJp || move.name} → ${defender.nameJp}`, el("br"),
-        `相手HP実数値 ${r.maxHp}${cond.remainPct < 100 ? `（残り${cond.remainPct}% = ${curHp}）` : ""} ・ ${effLabelOf(r.eff, r.immune)}${r.stab > 1 ? ` ・ タイプ一致×${r.stab}` : ""}`,
+        `相手HP実数値 ${r.maxHp}${cond.remainPct < 100 ? `（残り${cond.remainPct}% = ${curHp}）` : ""} ・ ${effLabelOf(r.eff, r.immune)}${r.stab > 1 ? ` ・ タイプ一致×${r.stab}` : ""} ・ ${s.label}`,
       ]),
-      el("div", { class: "rolls-head" }, "乱数（ダメージ / 削れる割合 / 出る確率）"),
-      el("div", { class: "roll-grid" }, rollCells(r.rolls, r.maxHp, curHp)),
-      koLine(r.rolls, curHp),
-    );
+      el("details", { class: "rolls" }, [
+        el("summary", {}, "乱数をくわしく（ダメージ / 削れる割合 / 出る確率）"),
+        el("div", { class: "roll-grid" }, rollCells(r.rolls, r.maxHp, curHp)),
+        koLine(r.rolls, curHp),
+      ]),
+    ]));
+  }
+  // 結論を信号色で一目で。緑=確定で倒せる / 黄=乱数で倒せる / 赤=倒せない。
+  function verdictBadge(r, curHp) {
+    const s = r.summary;
+    if (r.immune) return el("div", { class: "verdict no" }, "効果なし（特性で無効）");
+    if (r.eff === 0 || s.max === 0) return el("div", { class: "verdict no" }, "効果なし（ダメージなし）");
+    const ko = r.rolls.filter((v) => v >= curHp).length;
+    if (s.guaranteed === 1) return el("div", { class: "verdict ok" }, "✓ 確定1発で倒せる");
+    if (ko > 0) return el("div", { class: "verdict maybe" }, `△ 乱数1発で倒せる（${(ko / r.rolls.length * 100).toFixed(0)}%）`);
+    if (s.guaranteed) return el("div", { class: "verdict no" }, `1発では落ちない（確定${s.guaranteed}発・最大${s.pctMax.toFixed(0)}%）`);
+    return el("div", { class: "verdict no" }, `${r.rolls.length}発でも倒せない（最大${s.pctMax.toFixed(0)}%）`);
   }
   // 乱数16通り（85〜100は各1/16で等確率）。丸めで同じダメージ値になる分を合算した確率を表示。
   function rollCells(rolls, maxHp, curHp) {
@@ -504,7 +678,7 @@ function damageTab(preset) {
   }
 
   function renderAll(cond) {
-    const moves = attackingMovesFor(attacker);
+    const moves = attackingMovesFor(attacker).filter((m) => allTypeChips.matches([m.type]));
     const rows = moves.map((m) => ({ m, r: computeOne(attacker, defender, m, cond) }))
       .sort((a, b) => b.r.summary.pctMax - a.r.summary.pctMax);
     const table = el("table", { class: "data-table" }, [
@@ -523,33 +697,51 @@ function damageTab(preset) {
     ]);
     result.replaceChildren(
       el("div", { class: "dmg-detail" }, `${attacker.nameJp} → ${defender.nameJp}（覚える攻撃技を一括計算・与ダメ割合の高い順）`),
-      el("div", { class: "table-wrap" }, table),
+      allTypeChips.node,
+      rows.length ? el("div", { class: "table-wrap" }, table) : el("p", { class: "hint" }, "選択タイプの技がありません"),
     );
   }
 
-  const grid = el("div", { class: "dmg-grid" }, [
+  // コア入力（常時表示）: まずこの3つだけで結論が出る
+  const coreGrid = el("div", { class: "dmg-grid" }, [
     el("section", { class: "card" }, [
       el("h3", {}, "攻撃側"),
       labeled("ポケモン", atkSel),
+      el("div", { class: "fav-row2" }, [labeled("お気に入りから", atkFavSel), labeled("ランキングから", atkRankPickSel)]),
+      el("div", { class: "field" }, [el("label", {}, "最近使った攻撃"), atkRecents]),
       labeled("わざ", moveSel),
+      el("div", { class: "fav-actions" }, [atkSaveBtn]),
+    ]),
+    el("section", { class: "card" }, [
+      el("h3", {}, "防御側"),
+      labeled("ポケモン", defSel),
+      labeled("ランキングから", defRankPickSel),
+      el("div", { class: "field" }, [el("label", {}, "最近使った防御"), defRecents]),
+    ]),
+  ]);
+
+  // 詳細設定（折りたたみ）: SP・性格・とくせい・持ち物・ランク・場・補正
+  const advGrid = el("div", { class: "dmg-grid" }, [
+    el("section", { class: "card" }, [
+      el("h4", { class: "card-sub" }, "攻撃側の詳細"),
       el("div", { class: "fav-row2" }, [labeled("攻撃SP(0-32)", atkSP), labeled("ランク補正", atkRankSel)]),
       labeled("性格補正", atkNature),
       labeled("とくせい", atkAbilSel),
       labeled("持ち物", atkItemSel),
     ]),
     el("section", { class: "card" }, [
-      el("h3", {}, "防御側"),
-      labeled("ポケモン", defSel),
-      el("div", { class: "field" }, [el("label", {}, "最近使った防御"), defRecents]),
+      el("h4", { class: "card-sub" }, "防御側の詳細"),
       el("div", { class: "fav-row2" }, [labeled("HP SP(0-32)", defHpSP), labeled("残りHP(%)", remainHp)]),
-      el("div", { class: "fav-row2" }, [labeled("防御SP(0-32)", defDefSP), labeled("ランク補正", defRankSel)]),
-      labeled("防御の性格補正", defNature),
+      el("p", { class: "hint" }, "防御(B)=物理技を受ける時／特防(D)=特殊技を受ける時に使われます。"),
+      el("div", { class: "fav-row2" }, [labeled("防御SP(0-32)", defBSP), labeled("特防SP(0-32)", defDSP)]),
+      el("div", { class: "fav-row2" }, [labeled("防御の性格補正", defNatB), labeled("特防の性格補正", defNatD)]),
+      labeled("ランク補正", defRankSel),
       labeled("とくせい", defAbilSel),
       labeled("持ち物", defItemSel),
     ]),
   ]);
   const fieldRow = el("section", { class: "card" }, [
-    el("h3", {}, "場の状態"),
+    el("h4", { class: "card-sub" }, "場の状態"),
     el("div", { class: "sp-controls" }, [labeled("天候", weatherSel), labeled("フィールド", terrainSel), labeled("壁", screenSel)]),
   ]);
   const modRow = el("div", { class: "toggles" }, [
@@ -557,10 +749,16 @@ function damageTab(preset) {
     el("label", { class: "toggle" }, [cbBurn, " やけど(物理×0.5)"]),
     el("label", { class: "toggle" }, [cbAll, " 全技ダメ計（一括）"]),
   ]);
+  const moreDetails = el("details", { class: "more" }, [
+    el("summary", {}, "詳細設定（SP・性格・とくせい・持ち物・ランク・天候・壁・急所など）"),
+    advGrid, fieldRow, modRow,
+  ]);
 
+  // 結論を最上部に（モバイルでは画面上部に固定）→ 入力はその下
   root.append(
-    el("p", { class: "hint" }, "Lv50固定。ランク補正・天候・フィールド・壁・とくせい・持ち物に対応。とくせい/持ち物は任意（未選択=影響なし）。「計算未対応」表記の特性や接触/連続技依存の効果は反映されません。"),
-    grid, fieldRow, modRow, result
+    result,
+    el("p", { class: "hint" }, "相手と自分のポケモン・わざを選ぶだけで結論が出ます（攻撃SP最大・性格↑が初期値）。ランク補正・天候・壁・とくせい・持ち物は「詳細設定」で。「計算未対応」の特性や接触/連続技依存は反映されません。"),
+    coreGrid, moreDetails
   );
 
   // お気に入り/流行りから攻撃側プリセットを反映
@@ -581,6 +779,8 @@ function damageTab(preset) {
   }
 
   refreshMoves();
+  renderAtkRecents();
+  fillAtkFavSelect();
   renderRecents();
   fillAbilitySelect(atkAbilSel, attacker);
   fillAbilitySelect(defAbilSel, defender);
@@ -595,69 +795,6 @@ function labeled(label, control) {
   return el("div", { class: "field" }, [el("label", {}, label), control]);
 }
 
-// =================== タブ3: 能力ポイント(SP)配分 ===================
-function spTab(preset) {
-  const root = el("div", { class: "tab-panel" });
-  let poke;
-  const spState = { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
-
-  const sel = pokemonSelect((p) => { poke = p; render(); }, "sp-poke");
-  poke = store.pokemonByName.get(sel.value); // 初期表示と一致
-  const natSel = natureSelect("sp-nature");
-  natSel.addEventListener("change", render);
-
-  const inputs = {};
-  for (const k of STAT_KEYS) {
-    inputs[k] = el("input", { type: "number", min: "0", max: String(SP_MAX_PER_STAT), value: "0", class: "sp-input",
-      oninput: (e) => { spState[k] = clamp(e.target.value); render(); } });
-  }
-
-  const totalBadge = el("span", { class: "total-badge" });
-  const statsTable = el("div", { class: "table-wrap" });
-
-  function clamp(v) { return Math.max(0, Math.min(SP_MAX_PER_STAT, parseInt(v || "0", 10) || 0)); }
-
-  function render() {
-    const nature = getNature(natSel.value);
-    const stats = calcAllStats(poke.base, spState, nature);
-    const total = spTotal(spState);
-    const over = total > SP_TOTAL;
-    totalBadge.textContent = `合計SP ${total} / ${SP_TOTAL}`;
-    totalBadge.classList.toggle("over", over);
-
-    const rows = STAT_KEYS.map((k) => el("tr", {}, [
-      el("td", {}, STAT_LABELS_JP[k]),
-      el("td", { class: "num dim" }, String(poke.base[k])),
-      el("td", {}, inputs[k]),
-      el("td", { class: "num hl" }, String(stats[k])),
-    ]));
-    const table = el("table", { class: "data-table sp-table" }, [
-      el("thead", {}, el("tr", {}, [el("th", {}, "ステータス"), el("th", { class: "num" }, "種族値"), el("th", {}, "SP"), el("th", { class: "num" }, "実数値")])),
-      el("tbody", {}, rows),
-    ]);
-    statsTable.replaceChildren(table);
-  }
-
-  root.append(
-    el("p", { class: "hint" }, "SPは各ステ上限32・合計66。1SP=実数値+1（Lv50・個体値31固定）。性格補正はHP以外に反映。" ),
-    el("div", { class: "sp-controls" }, [labeled("ポケモン", sel), labeled("せいかく", natSel), totalBadge]),
-    statsTable
-  );
-
-  if (preset) {
-    if (preset.pokemon && store.pokemonByName.has(preset.pokemon)) {
-      sel.value = preset.pokemon; poke = store.pokemonByName.get(preset.pokemon);
-    }
-    if (preset.nature) natSel.value = preset.nature;
-    for (const k of STAT_KEYS) {
-      spState[k] = preset.sp?.[k] ?? 0;
-      inputs[k].value = String(spState[k]);
-    }
-  }
-  render();
-  return root;
-}
-
 // =================== タブ: 逆算（耐久調整 R1） ===================
 function reverseTab() {
   const root = el("div", { class: "tab-panel" });
@@ -670,7 +807,7 @@ function reverseTab() {
   const atkNature = natureTriToggle("up");
   const atkRankSel = rankSelect(render);
   const atkAbilSel = el("select", { class: "abil-select", onchange: render });
-  const atkItemSel = realItemSelect(render);
+  const atkItemSel = realItemSelect("atk", render);
 
   // 防御側
   const defSel = pokemonSelect((p) => { defender = p; fillAbilitySelect(defAbilSel, p); applyMega2(defItemSel, p); render(); }, "rv-def");
@@ -678,7 +815,7 @@ function reverseTab() {
   defender = store.pokemonByName.get(defSel.value);
   const defNature = natureTriToggle("neutral");
   const defAbilSel = el("select", { class: "abil-select", onchange: render });
-  const defItemSel = realItemSelect(render);
+  const defItemSel = realItemSelect("def", render);
 
   // 場
   const weatherSel = fieldSelect(WEATHERS, render);
@@ -837,7 +974,7 @@ function moveOptionNodes(pokemon) {
   return nodes;
 }
 
-function favoritesTab() {
+function favoritesTab(preset) {
   const root = el("div", { class: "tab-panel" });
   let editing = null;       // 編集中レコードid（null=新規）
   let selPoke;
@@ -850,10 +987,8 @@ function favoritesTab() {
   const natSel = natureSelect("fav-nature");
   natSel.addEventListener("change", renderStats);
 
-  // 持てる対戦アイテムのみ（メガストーンは自動反映するため除外）を日本語名順に
-  const pickerItems = store.items
-    .filter((it) => it.holdable && it.category !== "mega-stones" && it.nameJp && it.nameJp !== it.name)
-    .sort((a, b) => a.nameJp.localeCompare(b.nameJp, "ja"));
+  // 持てる対戦アイテムのみ（メガストーンは自動反映するため除外・現レギュ合法のみ）を日本語名順に
+  const pickerItems = holdableItems();
   const itemListId = "fav-item-list";
   const itemList = el("datalist", { id: itemListId }, pickerItems.map((it) => el("option", { value: it.nameJp })));
   const itemInput = el("input", { type: "text", class: "search", list: itemListId, placeholder: "持ち物（例: こだわりスカーフ）" });
@@ -991,7 +1126,6 @@ function favoritesTab() {
         rec.note ? el("div", { class: "fav-card-note dim" }, rec.note) : null,
         el("div", { class: "fav-card-actions" }, [
           el("button", { type: "button", class: "mini", onclick: () => nav.open(TAB.DAMAGE, { pokemon: rec.pokemon, sp: rec.sp, nature: rec.nature, item: rec.item, move: rec.moves?.[0] }) }, "ダメ計(攻)で使う"),
-          el("button", { type: "button", class: "mini", onclick: () => nav.open(TAB.SP, { pokemon: rec.pokemon, sp: rec.sp, nature: rec.nature }) }, "SP配分で開く"),
           el("button", { type: "button", class: "mini", onclick: () => loadIntoForm(rec) }, "編集"),
           el("button", { type: "button", class: "mini danger", onclick: () => { if (confirm(`「${rec.label}」を削除しますか？`)) renderList(removeFavorite(rec.id)); } }, "削除"),
         ]),
@@ -1008,6 +1142,21 @@ function favoritesTab() {
   rebuildMoves();
   resetForm();
   renderList();
+
+  // ダメ計の「この攻撃をマイポケモンに登録」から渡された入力で新規登録フォームを下書き
+  if (preset?.newFrom) {
+    const nf = preset.newFrom;
+    if (nf.pokemon && store.pokemonByName.has(nf.pokemon)) {
+      pokeSel.value = nf.pokemon; selPoke = store.pokemonByName.get(nf.pokemon);
+      applyMegaItem(); rebuildMoves();
+    }
+    if (nf.item && !itemInput.readOnly) itemInput.value = nf.item;
+    if (nf.sp) for (const k of STAT_KEYS) { spState[k] = nf.sp[k] ?? 0; spInputs[k].value = String(spState[k]); }
+    if (nf.moves) moveSels.forEach((s, i) => { s.value = nf.moves[i] || ""; });
+    labelInput.value = `${selPoke.nameJp}（攻撃）`;
+    renderStats();
+    root.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   return root;
 }
 
@@ -1053,12 +1202,11 @@ async function main() {
   app.replaceChildren(
     regulationBanner(),
     tabs([
-      { label: "素早さ一覧", render: speedTab },
-      { label: "流行り", render: usageTab },
       { label: "ダメージ計算", render: damageTab },
-      { label: "SP配分", render: spTab },
-      { label: "マイポケモン", render: favoritesTab },
+      { label: "素早さ一覧", render: speedTab },
       { label: "逆算", render: reverseTab },
+      { label: "流行り", render: usageTab },
+      { label: "マイポケモン", render: favoritesTab },
     ]),
   );
 }

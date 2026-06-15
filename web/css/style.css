@@ -100,6 +100,15 @@ main { max-width: 920px; margin: 0 auto; padding: 12px 12px 32px; }
 .type-dragon{background:#7038f8;color:#fff}.type-dark{background:#705848;color:#fff}
 .type-steel{background:#b8b8d0}.type-fairy{background:#ee99ac}.type-stellar{background:#40b5a5;color:#fff}
 
+/* タイプ絞り込みチップ（複数選択OR）。未選択は薄く、選択中は枠線で強調 */
+.type-chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin: 8px 0; }
+.type-chips-label { font-size: .78rem; color: var(--dim); margin-right: 2px; }
+.type-chip { font-size: .74rem; padding: 4px 9px; border: 2px solid transparent; cursor: pointer; opacity: .42; transition: opacity .12s; }
+.type-chip:hover { opacity: .75; }
+.type-chip[aria-pressed="true"] { opacity: 1; border-color: var(--text); box-shadow: 0 0 0 1px var(--bg) inset; }
+.type-chip-clear { align-self: center; }
+@media (max-width: 600px) { .type-chip { min-height: 34px; } }
+
 /* ダメージ計算 */
 .dmg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
@@ -113,6 +122,24 @@ main { max-width: 920px; margin: 0 auto; padding: 12px 12px 32px; }
 .dmg-detail { margin-top: 10px; color: var(--dim); font-size: .82rem; }
 .data-table td.bad { color: var(--bad); font-weight: 700; }
 select:disabled { opacity: .85; border-style: dashed; }
+
+/* 結論バッジ（信号色で一目） */
+.verdict { font-weight: 800; font-size: 1.05rem; padding: 8px 12px; border-radius: 10px; margin-bottom: 8px; }
+.verdict.ok { background: rgba(52,211,153,.15); color: var(--good); border: 1px solid var(--good); }
+.verdict.maybe { background: rgba(255,216,77,.15); color: var(--hl); border: 1px solid var(--hl); }
+.verdict.no { background: rgba(248,113,113,.12); color: var(--bad); border: 1px solid var(--bad); }
+
+/* 詳細設定の折りたたみ */
+details.more, details.rolls { margin-top: 10px; }
+details.more > summary, details.rolls > summary {
+  cursor: pointer; color: var(--accent); font-size: .85rem; font-weight: 600;
+  padding: 8px 0; list-style: none;
+}
+details.more > summary::before, details.rolls > summary::before { content: "▸ "; }
+details.more[open] > summary::before, details.rolls[open] > summary::before { content: "▾ "; }
+details.more > summary::-webkit-details-marker, details.rolls > summary::-webkit-details-marker { display: none; }
+details.more .dmg-grid { margin-top: 6px; }
+.card-sub { margin: 0 0 8px; font-size: .82rem; color: var(--dim); }
 
 /* 検索付きポケモン選択（コンボボックス） */
 .poke-combo { position: relative; }
@@ -134,18 +161,22 @@ select:disabled { opacity: .85; border-style: dashed; }
 .roll-cell.ko small { color: var(--bad); }
 @media (max-width: 480px) { .roll-grid { grid-template-columns: repeat(4, 1fr); } }
 
-/* SP配分 */
+/* SP入力（ダメ計の「場の状態」・マイポケモンのSP合計表示で使用） */
 .sp-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 10px 0; }
 .sp-controls .field { min-width: 160px; }
 .total-badge { background: var(--surface-2); border: 1px solid var(--line); padding: 8px 12px; border-radius: 8px; font-weight: 700; font-size: .85rem; }
 .total-badge.over { background: var(--bad); color: #fff; }
-.sp-table td:nth-child(3) { width: 80px; }
 
-/* 最近使った（履歴）チップ */
-.recents { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 最近使った（履歴）チップ。最大50件まで保存するため横スクロールで省スペースに。 */
+.recents { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; padding-bottom: 4px; max-width: 100%; }
+.recents .chip-btn { flex: 0 0 auto; }
 .recents-empty { font-size: .74rem; }
 .chip-btn { font-size: .76rem; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); cursor: pointer; }
 .chip-btn:hover { border-color: var(--accent-2); }
+/* スナップショット履歴チップ（名前＋小さな詳細行） */
+.chip-snap { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; line-height: 1.15; border-radius: 12px; text-align: left; }
+.chip-snap .chip-name { font-weight: 600; }
+.chip-snap .chip-sub { color: var(--dim); font-size: .64rem; white-space: nowrap; }
 input.locked { opacity: .85; border-style: dashed; cursor: not-allowed; }
 
 /* マイポケモン（お気に入り） */
@@ -186,4 +217,22 @@ button.mini.danger { color: var(--bad); }
   .fav-list { grid-template-columns: 1fr; }
   .fav-move-grid { grid-template-columns: 1fr; }
   .site-header h1 { font-size: 1.1rem; }
+  /* ダメ計の結論を画面上部に固定（スクロールしても結論が見える） */
+  .dmg-result { position: sticky; top: 4px; z-index: 20; margin-top: 0; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+
+  /* タブを画面下に固定（親指で届くボトムナビ） */
+  .tabs {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+    margin: 0; gap: 0; padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+    background: var(--surface); border-top: 1px solid var(--line);
+  }
+  .tab-btn { border-radius: 8px; border: none; font-size: .66rem; padding: 6px 2px; white-space: nowrap; }
+  .tab-btn.active { background: var(--surface-2); border-bottom: none; color: var(--accent); }
+  /* ボトムナビに隠れないよう本文に余白 */
+  main { padding-bottom: 72px; }
+
+  /* タップ領域を最低44pxに（片手・誤タップ対策） */
+  .tab-btn { min-height: 48px; }
+  .tri, .chip-btn, button.mini, select, .search, .poke-search, .move-select { min-height: 44px; }
+  .toggle { min-height: 36px; }
 }

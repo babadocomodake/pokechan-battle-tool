@@ -26,6 +26,42 @@ CURRENT_SEASON = "M-2"
 
 USER_AGENT = "Mozilla/5.0 (compatible; pokechamp-helper/0.1; data sync)"
 
+# ── 合法アイテム ホワイトリスト（レギュレーションごとに変わる）──────────────
+# Serebii はアイテムの合法一覧を持たない（フォームのみ列挙）ため、ここを手管理する。
+# 一次源（item-legality が最速で公開される専用ページ）:
+#   RotomPicks  https://rotompicks.com/en/items/   ← 推奨・Regulation別の合法アイテム一覧
+# 突合（裏取り）に使った副ソース:
+#   MetaVGC     https://metavgc.com/guides/pokemon-champions-format-legal-pokemon-items-moves
+#   PokeBase    https://pokemondb.net/pokebase/439258/what-are-all-the-items-allowed-in-champions
+# 更新手順（レギュ切替時）:
+#   1) RotomPicks の現レギュ「Legal Items」を開き、英語名を全て取得
+#   2) 下の LEGAL_ITEMS を置換（英語名は data/items.json の name 表記に合わせる）
+#   3) build_data.py を実行 → data/ と web/data/ の regulation.json に反映
+# 注意: M-A はショップ未実装のため、こだわり系/いのちのたま/チョッキ/きせき等は「非合法」。
+LEGAL_ITEMS_SOURCE = "https://rotompicks.com/en/items/ (cross-checked: metavgc.com, pokemondb pokebase)"
+LEGAL_ITEMS = [
+    "Abomasite", "Absolite", "Aerodactylite", "Aggronite", "Alakazite", "Altarianite",
+    "Ampharosite", "Aspear Berry", "Audinite", "Babiri Berry", "Banettite", "Beedrillite",
+    "Black Belt", "Black Glasses", "Blastoisinite", "Bright Powder", "Cameruptite", "Chandelurite",
+    "Charcoal", "Charizardite X", "Charizardite Y", "Charti Berry", "Cheri Berry", "Chesnaughtite",
+    "Chesto Berry", "Chilan Berry", "Chimechite", "Choice Scarf", "Chople Berry", "Clefablite",
+    "Coba Berry", "Colbur Berry", "Crabominite", "Delphoxite", "Dragon Fang", "Dragoninite",
+    "Drampanite", "Emboarite", "Excadrite", "Fairy Feather", "Feraligite", "Floettite",
+    "Focus Band", "Focus Sash", "Froslassite", "Galladite", "Garchompite", "Gardevoirite",
+    "Gengarite", "Glalitite", "Glimmoranite", "Golurkite", "Greninjite", "Gyaradosite",
+    "Haban Berry", "Hard Stone", "Hawluchanite", "Heracronite", "Houndoominite", "Kangaskhanite",
+    "Kasib Berry", "Kebia Berry", "King's Rock", "Leftovers", "Leppa Berry", "Light Ball",
+    "Lopunnite", "Lucarionite", "Lum Berry", "Magnet", "Manectite", "Medichamite",
+    "Meganiumite", "Mental Herb", "Meowsticite", "Metal Coat", "Miracle Seed", "Mystic Water",
+    "Never-Melt Ice", "Occa Berry", "Oran Berry", "Passho Berry", "Payapa Berry", "Pecha Berry",
+    "Persim Berry", "Pidgeotite", "Pinsirite", "Poison Barb", "Quick Claw", "Rawst Berry",
+    "Rindo Berry", "Roseli Berry", "Sablenite", "Scizorite", "Scope Lens", "Scovillainite",
+    "Sharp Beak", "Sharpedonite", "Shell Bell", "Shuca Berry", "Silk Scarf", "Silver Powder",
+    "Sitrus Berry", "Skarmorite", "Slowbronite", "Soft Sand", "Spell Tag", "Starminite",
+    "Steelixite", "Tanga Berry", "Twisted Spoon", "Tyranitarite", "Venusaurite", "Victreebelite",
+    "Wacan Berry", "White Herb", "Yache Berry",
+]
+
 # Serebii のページ構造変化を検知するための健全性しきい値
 MIN_EXPECTED_FORMS = 150
 
@@ -118,6 +154,8 @@ def fetch_regulation(cache_dir: Path | None = None, force: bool = False) -> Regu
             "no_duplicate_items": True,
             "gimmick": "Mega Evolution",
             "banned": ["Mega Lucario Z", "Mega Garchomp Z"],
+            "legal_items": LEGAL_ITEMS,
+            "legal_items_source": LEGAL_ITEMS_SOURCE,
             "note": "Lv50統一・個体値31固定・同種/同道具禁止。ダイマ/テラスは不可。",
         },
     )
