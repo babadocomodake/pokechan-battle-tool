@@ -1,0 +1,13 @@
+# データ取得キャッシュ（再生成可能）
+data/raw/
+
+# Python
+__pycache__/
+*.pyc
+
+# Playwright / 検証用スクショ
+.playwright-mcp/
+*.png
+
+# OS
+.DS_Store

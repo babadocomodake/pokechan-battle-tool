@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ポケチャン補助ツール（初心者向け）</title>
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <h1>ポケチャン補助ツール</h1>
+    <p class="tagline">素早さ一覧・ダメージ計算・SP配分（現レギュレーション同期）</p>
+  </header>
+
+  <main id="app">
+    <div class="loading">読み込み中 ...</div>
+  </main>
+
+  <footer class="site-footer">
+    <p class="note">
+      合法判定は <strong>Serebii</strong>（現レギュレーション）を一次解析源とし、シーズン切替時は
+      <a href="https://www.pokemonchampions.jp/ja/battle/" target="_blank" rel="noopener">公式</a>で要確認。
+    </p>
+    <p class="links">
+      参考サイト:
+      <a href="https://champs.pokedb.tokyo/" target="_blank" rel="noopener">バトルデータベース（使用率）</a> ・
+      <a href="https://pokesol.app/" target="_blank" rel="noopener">POKENOTE</a> ・
+      <a href="https://damekei.com/" target="_blank" rel="noopener">damekei（ダメ計照合）</a> ・
+      <a href="https://www.serebii.net/pokemonchampions/rankedbattle/" target="_blank" rel="noopener">Serebii</a>
+    </p>
+    <p class="credit">
+      ゲームデータ: <a href="https://github.com/otterlyclueless/pokemon-champions-data" target="_blank" rel="noopener">Pokemon Champions Data</a>（CC BY 4.0）
+    </p>
+  </footer>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

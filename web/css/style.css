@@ -1,0 +1,189 @@
+:root {
+  --bg: #0f1320;
+  --surface: #181d2e;
+  --surface-2: #20273b;
+  --line: #2c344c;
+  --text: #e9edf6;
+  --dim: #9aa4bd;
+  --accent: #ffcb05;     /* ポケモン黄 */
+  --accent-2: #3b6cff;
+  --good: #34d399;
+  --bad: #f87171;
+  --hl: #ffd84d;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+a { color: #9bb4ff; }
+
+.site-header {
+  padding: 16px 16px 12px;
+  background: linear-gradient(135deg, #20284a, #16203b);
+  border-bottom: 2px solid var(--accent);
+}
+.site-header h1 { margin: 0; font-size: 1.25rem; letter-spacing: .02em; }
+.site-header .tagline { margin: 2px 0 0; color: var(--dim); font-size: .8rem; }
+
+main { max-width: 920px; margin: 0 auto; padding: 12px 12px 32px; }
+.loading { text-align: center; color: var(--dim); padding: 40px 0; }
+
+/* レギュレーションバナー */
+.reg-banner {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 8px 12px; margin-bottom: 12px;
+}
+.reg-pill {
+  background: var(--accent); color: #1a1a1a; font-weight: 700;
+  padding: 2px 10px; border-radius: 999px; font-size: .82rem;
+}
+.reg-meta { color: var(--dim); font-size: .78rem; }
+
+/* タブ */
+.tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.tab-btn {
+  flex: 1; padding: 10px 6px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--dim); border-radius: 10px 10px 0 0; font-size: .9rem; font-weight: 600;
+  cursor: pointer;
+}
+.tab-btn.active { background: var(--surface-2); color: var(--text); border-bottom-color: var(--accent); border-bottom-width: 2px; }
+
+.tab-panel { animation: fade .15s ease; }
+@keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+
+.hint { color: var(--dim); font-size: .78rem; background: var(--surface); padding: 8px 10px; border-radius: 8px; border-left: 3px solid var(--accent-2); }
+
+/* フォーム */
+.search, select, .sp-input {
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; font-size: .9rem; width: 100%;
+}
+.sp-input { width: 70px; text-align: center; }
+.stage-select { width: auto; }
+.search { margin: 10px 0; }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.field > label { font-size: .76rem; color: var(--dim); }
+
+.toggles { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 10px 0; }
+.toggle { font-size: .82rem; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+
+/* 3択トグル */
+.tri-group { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.tri { background: var(--surface-2); color: var(--dim); border: none; padding: 8px 10px; cursor: pointer; font-size: .82rem; }
+.tri.on { background: var(--accent-2); color: #fff; font-weight: 700; }
+
+/* テーブル */
+.table-wrap { overflow-x: auto; margin-top: 10px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.data-table th, .data-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.data-table thead th { position: sticky; top: 0; background: var(--surface-2); color: var(--dim); font-size: .76rem; z-index: 1; }
+.data-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.data-table .hl { color: var(--hl); font-weight: 700; }
+.data-table .dim { color: var(--dim); }
+.data-table .rank { color: var(--dim); width: 2em; }
+.data-table tbody tr:hover, .data-table tbody tr:hover { background: var(--surface); }
+.pname { font-weight: 600; }
+
+/* タイプバッジ */
+.types { display: inline-flex; gap: 3px; }
+.type { font-size: .68rem; padding: 1px 6px; border-radius: 4px; color: #14181f; font-weight: 700; }
+.type-normal{background:#a8a878}.type-fire{background:#f08030}.type-water{background:#6890f0}
+.type-electric{background:#f8d030}.type-grass{background:#78c850}.type-ice{background:#98d8d8}
+.type-fighting{background:#c03028;color:#fff}.type-poison{background:#a040a0;color:#fff}
+.type-ground{background:#e0c068}.type-flying{background:#a890f0}.type-psychic{background:#f85888;color:#fff}
+.type-bug{background:#a8b820}.type-rock{background:#b8a038}.type-ghost{background:#705898;color:#fff}
+.type-dragon{background:#7038f8;color:#fff}.type-dark{background:#705848;color:#fff}
+.type-steel{background:#b8b8d0}.type-fairy{background:#ee99ac}.type-stellar{background:#40b5a5;color:#fff}
+
+/* ダメージ計算 */
+.dmg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.card h3 { margin: 0 0 8px; font-size: .9rem; }
+.dmg-result { margin-top: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; text-align: center; }
+.dmg-headline { display: flex; gap: 8px; justify-content: center; align-items: baseline; flex-wrap: wrap; }
+.dmg-num { font-size: 1.6rem; font-weight: 800; color: var(--hl); }
+.dmg-pct { color: var(--dim); }
+.dmg-ko { margin-top: 6px; font-weight: 700; color: var(--good); }
+.dmg-ko.ko { color: var(--bad); }
+.dmg-detail { margin-top: 10px; color: var(--dim); font-size: .82rem; }
+.data-table td.bad { color: var(--bad); font-weight: 700; }
+select:disabled { opacity: .85; border-style: dashed; }
+
+/* 検索付きポケモン選択（コンボボックス） */
+.poke-combo { position: relative; }
+.poke-search { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: .9rem; width: 100%; }
+.poke-search::placeholder { color: var(--dim); font-size: .82rem; }
+.combo-list { position: absolute; z-index: 30; top: 100%; left: 0; right: 0; margin: 3px 0 0; padding: 0; list-style: none; max-height: 260px; overflow-y: auto; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+.combo-list[hidden] { display: none; }
+.combo-item { padding: 7px 10px; cursor: pointer; font-size: .85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.combo-item.active, .combo-item:hover { background: var(--accent-2); color: #fff; }
+
+/* 乱数16通り（各ダメージ値と削れる％） */
+.rolls-head { margin-top: 12px; font-size: .76rem; color: var(--dim); text-align: left; }
+.roll-grid { margin-top: 4px; display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.roll-cell { display: flex; flex-direction: column; align-items: center; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 2px; line-height: 1.15; }
+.roll-cell b { font-size: .8rem; font-variant-numeric: tabular-nums; }
+.roll-cell small { font-size: .64rem; color: var(--dim); font-variant-numeric: tabular-nums; }
+.roll-cell small.prob { color: var(--hl); }
+.roll-cell.ko { border-color: var(--bad); }
+.roll-cell.ko small { color: var(--bad); }
+@media (max-width: 480px) { .roll-grid { grid-template-columns: repeat(4, 1fr); } }
+
+/* SP配分 */
+.sp-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 10px 0; }
+.sp-controls .field { min-width: 160px; }
+.total-badge { background: var(--surface-2); border: 1px solid var(--line); padding: 8px 12px; border-radius: 8px; font-weight: 700; font-size: .85rem; }
+.total-badge.over { background: var(--bad); color: #fff; }
+.sp-table td:nth-child(3) { width: 80px; }
+
+/* 最近使った（履歴）チップ */
+.recents { display: flex; flex-wrap: wrap; gap: 6px; }
+.recents-empty { font-size: .74rem; }
+.chip-btn { font-size: .76rem; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); cursor: pointer; }
+.chip-btn:hover { border-color: var(--accent-2); }
+input.locked { opacity: .85; border-style: dashed; cursor: not-allowed; }
+
+/* マイポケモン（お気に入り） */
+.fav-editor h3 { margin: 0 0 10px; font-size: 1rem; }
+.fav-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fav-sp-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.fav-sp-cell { display: flex; flex-direction: column; gap: 2px; font-size: .72rem; color: var(--dim); align-items: center; }
+.fav-sp-cell .sp-input { width: 100%; }
+.fav-statline { font-size: .78rem; margin: 6px 0 0; font-variant-numeric: tabular-nums; }
+.fav-move-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fav-note { font-family: inherit; resize: vertical; }
+.fav-actions { display: flex; gap: 8px; margin-top: 12px; }
+.tab-btn.primary { flex: 0 0 auto; padding: 10px 20px; background: var(--accent); color: #1a1a1a; border-color: var(--accent); border-radius: 8px; }
+.tab-btn.primary:hover { filter: brightness(1.05); }
+.fav-actions .tab-btn { border-radius: 8px; }
+.fav-list-title { font-size: 1rem; margin: 18px 0 8px; }
+.fav-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fav-card { display: flex; flex-direction: column; gap: 4px; }
+.fav-card-head { font-size: .95rem; }
+.fav-card-meta, .fav-card-note { font-size: .76rem; }
+.fav-card-stats { font-size: .76rem; color: var(--text); font-variant-numeric: tabular-nums; }
+.fav-card-moves { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0; }
+.move-chip { font-size: .72rem; background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
+.fav-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+button.mini { font-size: .74rem; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); cursor: pointer; }
+button.mini:hover { border-color: var(--accent-2); }
+button.mini.danger { color: var(--bad); }
+
+.error { background: var(--surface); border: 1px solid var(--bad); border-radius: 10px; padding: 16px; }
+.error code { display: inline-block; background: #000; padding: 4px 8px; border-radius: 6px; margin: 6px 0; }
+
+.site-footer { max-width: 920px; margin: 0 auto; padding: 16px 12px 40px; color: var(--dim); font-size: .76rem; border-top: 1px solid var(--line); }
+.site-footer a { color: #9bb4ff; }
+.site-footer .note { background: var(--surface); padding: 8px 10px; border-radius: 8px; }
+
+@media (max-width: 480px) {
+  .dmg-grid { grid-template-columns: 1fr; }
+  .fav-list { grid-template-columns: 1fr; }
+  .fav-move-grid { grid-template-columns: 1fr; }
+  .site-header h1 { font-size: 1.1rem; }
+}
