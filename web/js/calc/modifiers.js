@@ -169,3 +169,41 @@ export function itemMods(item, ctx) {
 
   return out;
 }
+
+// タイプの英語→日本語（効果文の表示用）。
+const TYPE_JP = {
+  Normal: "ノーマル", Fire: "ほのお", Water: "みず", Electric: "でんき", Grass: "くさ",
+  Ice: "こおり", Fighting: "かくとう", Poison: "どく", Ground: "じめん", Flying: "ひこう",
+  Psychic: "エスパー", Bug: "むし", Rock: "いわ", Ghost: "ゴースト", Dragon: "ドラゴン",
+  Dark: "あく", Steel: "はがね", Fairy: "フェアリー",
+};
+
+// 持ち物の「役割（攻撃用/防御用）」と日本語効果文を返す。
+// 判定は itemMods と同一（説明文の正規表現＋種族例外）なので、
+// UIの絞り込み（攻撃側=atk / 防御側=def）と効果文の表示が計算とズレない。
+// 返り値: { atk:boolean, def:boolean, jp:string }（計算に影響しない道具は両方 false）。
+export function itemRole(item) {
+  if (!item) return { atk: false, def: false, jp: "" };
+  const d = item.description || "";
+  const name = item.name;
+
+  // 種族専用
+  if (name === "Light Ball") return { atk: true, def: false, jp: "ピカチュウ専用：こうげき・とくこう ×2" };
+  if (name === "Thick Club") return { atk: true, def: false, jp: "カラカラ/ガラガラ専用：物理こうげき ×2" };
+
+  // ステータス倍率（こだわり / チョッキ / きせき）
+  if (/Attack is 1\.5x/i.test(d) && !/Sp\. ?Atk/i.test(d)) return { atk: true, def: false, jp: "物理こうげき ×1.5（こだわり：技固定）" };
+  if (/Sp\. ?Atk is 1\.5x/i.test(d)) return { atk: true, def: false, jp: "とくこう ×1.5（こだわり：技固定）" };
+  if (/Sp\. ?Def is 1\.5x/i.test(d)) return { atk: false, def: true, jp: "とくぼう ×1.5（攻撃技のみ選択可）" };
+  if (/Defense and Sp\. ?Def are 1\.5x/i.test(d)) return { atk: false, def: true, jp: "ぼうぎょ・とくぼう ×1.5（進化前のみ）" };
+
+  // ダメージ倍率（攻撃側）
+  if (/do 1\.3x damage/i.test(d)) return { atk: true, def: false, jp: "全こうげき ×1.3（毎ターンHP1/10減）" };
+  if (/super effective.*1\.2x damage/i.test(d)) return { atk: true, def: false, jp: "こうかばつぐんの技 ×1.2" };
+  if (/physical attacks have 1\.1x power/i.test(d)) return { atk: true, def: false, jp: "物理技 ×1.1" };
+  if (/special attacks have 1\.1x power/i.test(d)) return { atk: true, def: false, jp: "特殊技 ×1.1" };
+  const m = d.match(TYPE_ATK_RE);
+  if (m) return { atk: true, def: false, jp: `${TYPE_JP[m[1]] || m[1]}タイプの技 ×1.2` };
+
+  return { atk: false, def: false, jp: "" }; // 計算に影響しない道具
+}

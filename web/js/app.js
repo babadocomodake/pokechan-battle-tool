@@ -6,7 +6,7 @@ import { statStageMultiplier } from "./calc/stages.js";
 import { computeDamage, typeEffectiveness, stabMultiplier, summarize } from "./calc/damage.js";
 import {
   WEATHERS, TERRAINS, SCREENS, weatherDamageMult, weatherDefStatMult,
-  terrainDamageMult, screenMult, abilityMods, itemMods, isAbilitySupported,
+  terrainDamageMult, screenMult, abilityMods, itemMods, isAbilitySupported, itemRole,
 } from "./calc/modifiers.js";
 import { loadFavorites, upsertFavorite, removeFavorite, genId, emptySpread, loadRecent, pushRecent } from "./favorites.js";
 
@@ -277,15 +277,27 @@ function spInput(initial, id) {
 function clampSPVal(v) { return Math.max(0, Math.min(SP_MAX_PER_STAT, parseInt(v || "0", 10) || 0)); }
 function itemObj(name) { return name ? store.itemsByName.get(name) || null : null; }
 
-// 持てる対戦アイテム（メガストーン除外）を日本語名順に。お気に入りと同じ選別。
+// 現レギュ合法か（regulation の legal_items 集合で判定。空ならフォールバックで全許可）。
+function isItemLegal(it) {
+  return store.legalItems.size === 0 || store.legalItems.has(it.name);
+}
+// 持てる対戦アイテム（メガストーン除外・現レギュ合法のみ）を日本語名順に。
 function holdableItems() {
   return store.items
-    .filter((it) => it.holdable && it.category !== "mega-stones" && it.nameJp && it.nameJp !== it.name)
+    .filter((it) => it.holdable && it.category !== "mega-stones" && it.nameJp && it.nameJp !== it.name && isItemLegal(it))
     .sort((a, b) => a.nameJp.localeCompare(b.nameJp, "ja"));
 }
-function realItemSelect(onChange) {
+// 役割が一致する道具だけ（side="atk"=威力関連 / "def"=防御関連）。効果文付きで返す。
+function roleItems(side) {
+  return holdableItems().filter((it) => itemRole(it)[side]);
+}
+// ダメ計用の持ち物セレクト。side で攻/防の効果あり道具のみに絞り、効果文を併記する。
+function realItemSelect(side, onChange) {
   const opts = [el("option", { value: "" }, "道具なし"),
-    ...holdableItems().map((it) => el("option", { value: it.name }, it.nameJp))];
+    ...roleItems(side).map((it) => {
+      const r = itemRole(it);
+      return el("option", { value: it.name }, r.jp ? `${it.nameJp}（${r.jp}）` : it.nameJp);
+    })];
   return el("select", { class: "item-select", onchange: onChange }, opts);
 }
 // ランク補正セレクト(+6〜-6)
@@ -372,7 +384,7 @@ function damageTab(preset) {
   const atkNature = natureTriToggle("up");
   const atkRankSel = rankSelect(render);
   const atkAbilSel = el("select", { class: "abil-select", onchange: render });
-  const atkItemSel = realItemSelect(render);
+  const atkItemSel = realItemSelect("atk", render);
   const atkRecents = el("div", { class: "recents" });
   function renderAtkRecents() {
     const names = loadRecent(RECENT_ATK_KEY);
@@ -451,7 +463,7 @@ function damageTab(preset) {
   const defNature = natureTriToggle("neutral");
   const defRankSel = rankSelect(render);
   const defAbilSel = el("select", { class: "abil-select", onchange: render });
-  const defItemSel = realItemSelect(render);
+  const defItemSel = realItemSelect("def", render);
   const remainHp = el("input", { type: "number", min: "0", max: "100", value: "100", class: "sp-input", id: "def-remain" });
   // 防御側: ランキングから選択（名前のみ反映）
   const defRankPickSel = el("select", { class: "item-select" }, rankOptions("ランキングから選択…"));
@@ -709,7 +721,7 @@ function reverseTab() {
   const atkNature = natureTriToggle("up");
   const atkRankSel = rankSelect(render);
   const atkAbilSel = el("select", { class: "abil-select", onchange: render });
-  const atkItemSel = realItemSelect(render);
+  const atkItemSel = realItemSelect("atk", render);
 
   // 防御側
   const defSel = pokemonSelect((p) => { defender = p; fillAbilitySelect(defAbilSel, p); applyMega2(defItemSel, p); render(); }, "rv-def");
@@ -717,7 +729,7 @@ function reverseTab() {
   defender = store.pokemonByName.get(defSel.value);
   const defNature = natureTriToggle("neutral");
   const defAbilSel = el("select", { class: "abil-select", onchange: render });
-  const defItemSel = realItemSelect(render);
+  const defItemSel = realItemSelect("def", render);
 
   // 場
   const weatherSel = fieldSelect(WEATHERS, render);
@@ -889,10 +901,8 @@ function favoritesTab(preset) {
   const natSel = natureSelect("fav-nature");
   natSel.addEventListener("change", renderStats);
 
-  // 持てる対戦アイテムのみ（メガストーンは自動反映するため除外）を日本語名順に
-  const pickerItems = store.items
-    .filter((it) => it.holdable && it.category !== "mega-stones" && it.nameJp && it.nameJp !== it.name)
-    .sort((a, b) => a.nameJp.localeCompare(b.nameJp, "ja"));
+  // 持てる対戦アイテムのみ（メガストーンは自動反映するため除外・現レギュ合法のみ）を日本語名順に
+  const pickerItems = holdableItems();
   const itemListId = "fav-item-list";
   const itemList = el("datalist", { id: itemListId }, pickerItems.map((it) => el("option", { value: it.nameJp })));
   const itemInput = el("input", { type: "text", class: "search", list: itemListId, placeholder: "持ち物（例: こだわりスカーフ）" });
