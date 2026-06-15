@@ -8,7 +8,7 @@ import {
   WEATHERS, TERRAINS, SCREENS, weatherDamageMult, weatherDefStatMult,
   terrainDamageMult, screenMult, abilityMods, itemMods, isAbilitySupported, itemRole,
 } from "./calc/modifiers.js";
-import { loadFavorites, upsertFavorite, removeFavorite, genId, emptySpread, loadRecent, pushRecent } from "./favorites.js";
+import { loadFavorites, upsertFavorite, removeFavorite, genId, emptySpread, loadRecent, pushRecent, upsertRecentSnap, syncRecentSnapFront } from "./favorites.js";
 
 const RECENT_DEF_KEY = "pokechamp.recentDefenders.v1";
 const RECENT_ATK_KEY = "pokechamp.recentAttackers.v1";
@@ -357,7 +357,11 @@ function computeOne(attacker, defender, move, cond) {
   const eff = typeEffectiveness(move.type, defender.types, store.typechart.chart);
 
   let atkStat = calcStat(attacker.base[atkKey], cond.atkSP, atkKey, cond.atkNat);
-  let defStat = calcStat(defender.base[defKey], cond.defSP, defKey, cond.defNat);
+  // 防御は B(防御)/D(特防) を分けて持てる。技の物理/特殊で当たる方を使う。
+  // 逆算タブ等は単一値 cond.defSP/defNat を渡すので、それがあれば優先（後方互換）。
+  const defInvest = cond.defSP != null ? cond.defSP : (physical ? cond.defBsp : cond.defDsp) || 0;
+  const defNat = cond.defNat != null ? cond.defNat : (physical ? cond.defBnat : cond.defDnat) || 1.0;
+  let defStat = calcStat(defender.base[defKey], defInvest, defKey, defNat);
   const maxHp = calcStat(defender.base.hp, cond.defHpSP, "hp", 1.0);
 
   const ctx = {
@@ -466,26 +470,72 @@ function damageTab(preset) {
   } }, "この攻撃をマイポケモンに登録");
 
   // 防御側
-  const defSel = pokemonSelect((p) => { defender = p; pushRecent(RECENT_DEF_KEY, p.name, RECENT_CAP); renderRecents(); fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p); render(); }, "def-poke");
+  const defSel = pokemonSelect((p) => commitDefenderSelection(p), "def-poke");
   const defRecents = el("div", { class: "recents" });
+  // 履歴要素(旧:文字列 / 新:スナップショット)を正規化。
+  function asSnap(x) { return typeof x === "string" ? { pokemon: x } : (x || {}); }
+  // 防御側の現在設定をスナップショット化（SP/性格/持ち物/特性）。
+  function defSnapshot() {
+    const natState = (m) => (m > 1 ? "up" : m < 1 ? "down" : "neutral");
+    return {
+      pokemon: defender.name,
+      hpSp: clampSPVal(defHpSP.value), bSp: clampSPVal(defBSP.value), dSp: clampSPVal(defDSP.value),
+      natB: natState(defNatB.get()), natD: natState(defNatD.get()),
+      item: defItemSel.disabled ? "" : (defItemSel.value || ""), ability: defAbilSel.value || "",
+    };
+  }
+  // 新規に防御ポケモンを確定。特性/持ち物はリセット、SP/性格は引き継ぎ、履歴先頭へ。
+  function commitDefenderSelection(p) {
+    defender = p; defSel.value = p.name;
+    fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p);
+    upsertRecentSnap(RECENT_DEF_KEY, defSnapshot(), RECENT_CAP);
+    renderRecents(); render();
+  }
+  // 履歴スナップショットを防御側にまるごと復元。
+  function restoreDefenderSnapshot(e) {
+    const s = asSnap(e);
+    const p = store.pokemonByName.get(s.pokemon); if (!p) return;
+    defender = p; defSel.value = p.name;
+    defHpSP.value = String(s.hpSp ?? 0); defBSP.value = String(s.bSp ?? 0); defDSP.value = String(s.dSp ?? 0);
+    defNatB.set(s.natB || "neutral"); defNatD.set(s.natD || "neutral");
+    fillAbilitySelect(defAbilSel, p); defAbilSel.value = s.ability || "";
+    applyMega(defItemSel, p);
+    if (s.item) { defItemSel.value = s.item; if (defItemSel.value !== s.item) defItemSel.value = ""; }
+    upsertRecentSnap(RECENT_DEF_KEY, defSnapshot(), RECENT_CAP);
+    renderRecents(); render();
+  }
+  // 履歴チップの詳細行（SP/性格/持ち物/特性の要約）。旧データ(名前のみ)は空。
+  function defSnapSummary(s, p) {
+    if (s.hpSp == null && s.bSp == null && s.dSp == null && !s.item && !s.ability) return "";
+    const arrow = (v) => (v === "up" ? "↑" : v === "down" ? "↓" : "");
+    const parts = [`H${s.hpSp || 0} B${s.bSp || 0}${arrow(s.natB)} D${s.dSp || 0}${arrow(s.natD)}`];
+    if (s.ability && p) { const i = (p.abilities || []).indexOf(s.ability); parts.push(i >= 0 ? (p.abilitiesJp?.[i] || s.ability) : s.ability); }
+    if (s.item) parts.push(store.itemsByName.get(s.item)?.nameJp || s.item);
+    return parts.join(" / ");
+  }
   function renderRecents() {
-    const names = loadRecent(RECENT_DEF_KEY);
-    if (!names.length) {
+    const entries = loadRecent(RECENT_DEF_KEY);
+    if (!entries.length) {
       defRecents.replaceChildren(el("span", { class: "dim recents-empty" }, "（最近使った防御ポケモンがここに出ます）"));
       return;
     }
-    defRecents.replaceChildren(...names.map((nm) => {
-      const p = store.pokemonByName.get(nm);
+    defRecents.replaceChildren(...entries.map((e) => {
+      const s = asSnap(e);
+      const p = store.pokemonByName.get(s.pokemon);
       if (!p) return null;
-      return el("button", { type: "button", class: "chip-btn",
-        onclick: () => { defSel.value = nm; defender = p; pushRecent(RECENT_DEF_KEY, nm, RECENT_CAP); renderRecents(); fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p); render(); } }, p.nameJp);
+      const summary = defSnapSummary(s, p);
+      return el("button", { type: "button", class: "chip-btn chip-snap", title: summary ? `${p.nameJp} ／ ${summary}` : p.nameJp,
+        onclick: () => restoreDefenderSnapshot(s) },
+        [el("span", { class: "chip-name" }, p.nameJp), summary ? el("small", { class: "chip-sub" }, summary) : null].filter(Boolean));
     }).filter(Boolean));
   }
   attacker = store.pokemonByName.get(atkSel.value);
   defender = store.pokemonByName.get(defSel.value);
   const defHpSP = spInput(0, "def-hp-sp");
-  const defDefSP = spInput(0, "def-def-sp");
-  const defNature = natureTriToggle("neutral");
+  const defBSP = spInput(0, "def-b-sp");   // 防御(B)への努力値
+  const defDSP = spInput(0, "def-d-sp");   // 特防(D)への努力値
+  const defNatB = natureTriToggle("neutral"); // 防御の性格補正
+  const defNatD = natureTriToggle("neutral"); // 特防の性格補正
   const defRankSel = rankSelect(render);
   const defAbilSel = el("select", { class: "abil-select", onchange: render });
   const defItemSel = realItemSelect("def", render);
@@ -495,8 +545,7 @@ function damageTab(preset) {
   defRankPickSel.addEventListener("change", () => {
     const nm = defRankPickSel.value; if (!nm) return;
     const p = store.pokemonByName.get(nm); if (!p) { defRankPickSel.value = ""; return; }
-    defSel.value = nm; defender = p; pushRecent(RECENT_DEF_KEY, nm, RECENT_CAP); renderRecents();
-    fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p); render();
+    commitDefenderSelection(p);
     defRankPickSel.value = "";
   });
 
@@ -512,9 +561,10 @@ function damageTab(preset) {
   // 全技ダメ計のとき、技を「そのタイプ」で絞り込むチップ（複数選択OR）
   const allTypeChips = typeFilterChips(render);
 
-  [atkSP, defHpSP, defDefSP, remainHp].forEach((i) => i.addEventListener("input", render));
+  [atkSP, defHpSP, defBSP, defDSP, remainHp].forEach((i) => i.addEventListener("input", render));
   atkNature.addEventListener("trichange", render);
-  defNature.addEventListener("trichange", render);
+  defNatB.addEventListener("trichange", render);
+  defNatD.addEventListener("trichange", render);
 
   const result = el("div", { class: "dmg-result" });
 
@@ -552,7 +602,10 @@ function damageTab(preset) {
   function gatherCond() {
     return {
       atkSP: clampSPVal(atkSP.value), atkNat: atkNature.get(),
-      defSP: clampSPVal(defDefSP.value), defNat: defNature.get(), defHpSP: clampSPVal(defHpSP.value),
+      // 防御は B/D 別々に渡す。computeOne が技の物理/特殊で当たる方を使う。
+      defBsp: clampSPVal(defBSP.value), defBnat: defNatB.get(),
+      defDsp: clampSPVal(defDSP.value), defDnat: defNatD.get(),
+      defHpSP: clampSPVal(defHpSP.value),
       atkRank: parseInt(atkRankSel.value, 10) || 0, defRank: parseInt(defRankSel.value, 10) || 0,
       atkAbility: atkAbilSel.value, defAbility: defAbilSel.value,
       atkItem: itemObj(atkItemSel.value), defItem: itemObj(defItemSel.value),
@@ -567,6 +620,9 @@ function damageTab(preset) {
   }
 
   function render() {
+    // 防御履歴の先頭が現在の防御ポケモンなら、編集中の設定を逐次反映（実際に使った状態を保存）。
+    // 内容が変わった時だけチップを再描画して、表示と復元データを最新に保つ。
+    if (syncRecentSnapFront(RECENT_DEF_KEY, defSnapshot())) renderRecents();
     const cond = gatherCond();
     if (cbAll.checked) return renderAll(cond);
     const move = store.movesByName.get(moveSel.value);
@@ -676,8 +732,10 @@ function damageTab(preset) {
     el("section", { class: "card" }, [
       el("h4", { class: "card-sub" }, "防御側の詳細"),
       el("div", { class: "fav-row2" }, [labeled("HP SP(0-32)", defHpSP), labeled("残りHP(%)", remainHp)]),
-      el("div", { class: "fav-row2" }, [labeled("防御SP(0-32)", defDefSP), labeled("ランク補正", defRankSel)]),
-      labeled("防御の性格補正", defNature),
+      el("p", { class: "hint" }, "防御(B)=物理技を受ける時／特防(D)=特殊技を受ける時に使われます。"),
+      el("div", { class: "fav-row2" }, [labeled("防御SP(0-32)", defBSP), labeled("特防SP(0-32)", defDSP)]),
+      el("div", { class: "fav-row2" }, [labeled("防御の性格補正", defNatB), labeled("特防の性格補正", defNatD)]),
+      labeled("ランク補正", defRankSel),
       labeled("とくせい", defAbilSel),
       labeled("持ち物", defItemSel),
     ]),

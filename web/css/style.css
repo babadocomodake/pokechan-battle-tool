@@ -173,6 +173,10 @@ details.more .dmg-grid { margin-top: 6px; }
 .recents-empty { font-size: .74rem; }
 .chip-btn { font-size: .76rem; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); cursor: pointer; }
 .chip-btn:hover { border-color: var(--accent-2); }
+/* スナップショット履歴チップ（名前＋小さな詳細行） */
+.chip-snap { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; line-height: 1.15; border-radius: 12px; text-align: left; }
+.chip-snap .chip-name { font-weight: 600; }
+.chip-snap .chip-sub { color: var(--dim); font-size: .64rem; white-space: nowrap; }
 input.locked { opacity: .85; border-style: dashed; cursor: not-allowed; }
 
 /* マイポケモン（お気に入り） */
