@@ -159,8 +159,9 @@ details.more .dmg-grid { margin-top: 6px; }
 .total-badge.over { background: var(--bad); color: #fff; }
 .sp-table td:nth-child(3) { width: 80px; }
 
-/* 最近使った（履歴）チップ */
-.recents { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 最近使った（履歴）チップ。最大50件まで保存するため横スクロールで省スペースに。 */
+.recents { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; padding-bottom: 4px; max-width: 100%; }
+.recents .chip-btn { flex: 0 0 auto; }
 .recents-empty { font-size: .74rem; }
 .chip-btn { font-size: .76rem; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); cursor: pointer; }
 .chip-btn:hover { border-color: var(--accent-2); }

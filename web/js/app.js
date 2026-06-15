@@ -1,6 +1,6 @@
 // アプリ本体: タブ（素早さ一覧 / 流行り / ダメージ計算 / SP配分 / マイポケモン / 逆算）
 import { loadData, store, getNature, attackingMovesFor, allMovesFor, byUsage } from "./data.js";
-import { calcStat, calcAllStats, STAT_KEYS, STAT_LABELS_JP, SP_MAX_PER_STAT, SP_TOTAL, spTotal } from "./calc/stats.js";
+import { calcStat, calcAllStats, STAT_KEYS, STAT_LABELS_JP, SP_MAX_PER_STAT, SP_TOTAL } from "./calc/stats.js";
 import { buildSpeedTable } from "./calc/speed.js";
 import { statStageMultiplier } from "./calc/stages.js";
 import { computeDamage, typeEffectiveness, stabMultiplier, summarize } from "./calc/damage.js";
@@ -11,11 +11,13 @@ import {
 import { loadFavorites, upsertFavorite, removeFavorite, genId, emptySpread, loadRecent, pushRecent } from "./favorites.js";
 
 const RECENT_DEF_KEY = "pokechamp.recentDefenders.v1";
+const RECENT_ATK_KEY = "pokechamp.recentAttackers.v1";
+const RECENT_CAP = 50; // 履歴の保存件数
 
 // タブのインデックスと、お気に入りから他タブを開くためのコントローラ
 // （tabs() に渡す配列の並びと必ず一致させること）
 // タブ並びは「対戦中によく使う順」（ダメ計→素早さ→逆算→準備系）。indexはmain()のtabs配列と一致させること。
-const TAB = { DAMAGE: 0, SPEED: 1, REVERSE: 2, USAGE: 3, SP: 4, FAV: 5 };
+const TAB = { DAMAGE: 0, SPEED: 1, REVERSE: 2, USAGE: 3, FAV: 4 };
 const nav = { open(_i, _preset) {} };
 
 // 性格の日本語名
@@ -364,16 +366,30 @@ function damageTab(preset) {
   let attacker, defender;
 
   // 攻撃側
-  const atkSel = pokemonSelect((p) => { attacker = p; refreshMoves(); fillAbilitySelect(atkAbilSel, p); applyMega(atkItemSel, p); render(); }, "atk-poke");
+  const atkSel = pokemonSelect((p) => { attacker = p; pushRecent(RECENT_ATK_KEY, p.name, RECENT_CAP); renderAtkRecents(); refreshMoves(); fillAbilitySelect(atkAbilSel, p); applyMega(atkItemSel, p); render(); }, "atk-poke");
   const moveSel = el("select", { class: "move-select", onchange: render });
   const atkSP = spInput(SP_MAX_PER_STAT, "atk-sp");
   const atkNature = natureTriToggle("up");
   const atkRankSel = rankSelect(render);
   const atkAbilSel = el("select", { class: "abil-select", onchange: render });
   const atkItemSel = realItemSelect(render);
+  const atkRecents = el("div", { class: "recents" });
+  function renderAtkRecents() {
+    const names = loadRecent(RECENT_ATK_KEY);
+    if (!names.length) {
+      atkRecents.replaceChildren(el("span", { class: "dim recents-empty" }, "（最近使った攻撃ポケモンがここに出ます）"));
+      return;
+    }
+    atkRecents.replaceChildren(...names.map((nm) => {
+      const p = store.pokemonByName.get(nm);
+      if (!p) return null;
+      return el("button", { type: "button", class: "chip-btn",
+        onclick: () => { atkSel.value = nm; attacker = p; pushRecent(RECENT_ATK_KEY, nm, RECENT_CAP); renderAtkRecents(); refreshMoves(); fillAbilitySelect(atkAbilSel, p); applyMega(atkItemSel, p); render(); } }, p.nameJp);
+    }).filter(Boolean));
+  }
 
   // 防御側
-  const defSel = pokemonSelect((p) => { defender = p; pushRecent(RECENT_DEF_KEY, p.name); renderRecents(); fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p); render(); }, "def-poke");
+  const defSel = pokemonSelect((p) => { defender = p; pushRecent(RECENT_DEF_KEY, p.name, RECENT_CAP); renderRecents(); fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p); render(); }, "def-poke");
   const defRecents = el("div", { class: "recents" });
   function renderRecents() {
     const names = loadRecent(RECENT_DEF_KEY);
@@ -385,7 +401,7 @@ function damageTab(preset) {
       const p = store.pokemonByName.get(nm);
       if (!p) return null;
       return el("button", { type: "button", class: "chip-btn",
-        onclick: () => { defSel.value = nm; defender = p; pushRecent(RECENT_DEF_KEY, nm); renderRecents(); fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p); render(); } }, p.nameJp);
+        onclick: () => { defSel.value = nm; defender = p; pushRecent(RECENT_DEF_KEY, nm, RECENT_CAP); renderRecents(); fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p); render(); } }, p.nameJp);
     }).filter(Boolean));
   }
   attacker = store.pokemonByName.get(atkSel.value);
@@ -546,6 +562,7 @@ function damageTab(preset) {
     el("section", { class: "card" }, [
       el("h3", {}, "攻撃側"),
       labeled("ポケモン", atkSel),
+      el("div", { class: "field" }, [el("label", {}, "最近使った攻撃"), atkRecents]),
       labeled("わざ", moveSel),
     ]),
     el("section", { class: "card" }, [
@@ -612,6 +629,7 @@ function damageTab(preset) {
   }
 
   refreshMoves();
+  renderAtkRecents();
   renderRecents();
   fillAbilitySelect(atkAbilSel, attacker);
   fillAbilitySelect(defAbilSel, defender);
@@ -624,69 +642,6 @@ function damageTab(preset) {
 
 function labeled(label, control) {
   return el("div", { class: "field" }, [el("label", {}, label), control]);
-}
-
-// =================== タブ3: 能力ポイント(SP)配分 ===================
-function spTab(preset) {
-  const root = el("div", { class: "tab-panel" });
-  let poke;
-  const spState = { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
-
-  const sel = pokemonSelect((p) => { poke = p; render(); }, "sp-poke");
-  poke = store.pokemonByName.get(sel.value); // 初期表示と一致
-  const natSel = natureSelect("sp-nature");
-  natSel.addEventListener("change", render);
-
-  const inputs = {};
-  for (const k of STAT_KEYS) {
-    inputs[k] = el("input", { type: "number", min: "0", max: String(SP_MAX_PER_STAT), value: "0", class: "sp-input",
-      oninput: (e) => { spState[k] = clamp(e.target.value); render(); } });
-  }
-
-  const totalBadge = el("span", { class: "total-badge" });
-  const statsTable = el("div", { class: "table-wrap" });
-
-  function clamp(v) { return Math.max(0, Math.min(SP_MAX_PER_STAT, parseInt(v || "0", 10) || 0)); }
-
-  function render() {
-    const nature = getNature(natSel.value);
-    const stats = calcAllStats(poke.base, spState, nature);
-    const total = spTotal(spState);
-    const over = total > SP_TOTAL;
-    totalBadge.textContent = `合計SP ${total} / ${SP_TOTAL}`;
-    totalBadge.classList.toggle("over", over);
-
-    const rows = STAT_KEYS.map((k) => el("tr", {}, [
-      el("td", {}, STAT_LABELS_JP[k]),
-      el("td", { class: "num dim" }, String(poke.base[k])),
-      el("td", {}, inputs[k]),
-      el("td", { class: "num hl" }, String(stats[k])),
-    ]));
-    const table = el("table", { class: "data-table sp-table" }, [
-      el("thead", {}, el("tr", {}, [el("th", {}, "ステータス"), el("th", { class: "num" }, "種族値"), el("th", {}, "SP"), el("th", { class: "num" }, "実数値")])),
-      el("tbody", {}, rows),
-    ]);
-    statsTable.replaceChildren(table);
-  }
-
-  root.append(
-    el("p", { class: "hint" }, "SPは各ステ上限32・合計66。1SP=実数値+1（Lv50・個体値31固定）。性格補正はHP以外に反映。" ),
-    el("div", { class: "sp-controls" }, [labeled("ポケモン", sel), labeled("せいかく", natSel), totalBadge]),
-    statsTable
-  );
-
-  if (preset) {
-    if (preset.pokemon && store.pokemonByName.has(preset.pokemon)) {
-      sel.value = preset.pokemon; poke = store.pokemonByName.get(preset.pokemon);
-    }
-    if (preset.nature) natSel.value = preset.nature;
-    for (const k of STAT_KEYS) {
-      spState[k] = preset.sp?.[k] ?? 0;
-      inputs[k].value = String(spState[k]);
-    }
-  }
-  render();
-  return root;
 }
 
 // =================== タブ: 逆算（耐久調整 R1） ===================
@@ -1022,7 +977,6 @@ function favoritesTab() {
         rec.note ? el("div", { class: "fav-card-note dim" }, rec.note) : null,
         el("div", { class: "fav-card-actions" }, [
           el("button", { type: "button", class: "mini", onclick: () => nav.open(TAB.DAMAGE, { pokemon: rec.pokemon, sp: rec.sp, nature: rec.nature, item: rec.item, move: rec.moves?.[0] }) }, "ダメ計(攻)で使う"),
-          el("button", { type: "button", class: "mini", onclick: () => nav.open(TAB.SP, { pokemon: rec.pokemon, sp: rec.sp, nature: rec.nature }) }, "SP配分で開く"),
           el("button", { type: "button", class: "mini", onclick: () => loadIntoForm(rec) }, "編集"),
           el("button", { type: "button", class: "mini danger", onclick: () => { if (confirm(`「${rec.label}」を削除しますか？`)) renderList(removeFavorite(rec.id)); } }, "削除"),
         ]),
@@ -1088,7 +1042,6 @@ async function main() {
       { label: "素早さ一覧", render: speedTab },
       { label: "逆算", render: reverseTab },
       { label: "流行り", render: usageTab },
-      { label: "SP配分", render: spTab },
       { label: "マイポケモン", render: favoritesTab },
     ]),
   );
