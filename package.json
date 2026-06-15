@@ -5,6 +5,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test \"web/js/calc/*.test.js\""
+    "test": "node --test"
   }
 }
