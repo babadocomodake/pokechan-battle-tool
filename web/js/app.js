@@ -325,8 +325,8 @@ function computeOne(attacker, defender, move, cond) {
     physical, moveType: move.type, moveName: move.name, attackerName: attacker.name,
     typeEff: eff, defenderFullHp: cond.remainPct >= 100, basePower: move.power,
   };
-  const aA = abilityMods(cond.atkAbility, ctx);
-  const dA = abilityMods(cond.defAbility, ctx);
+  const aA = abilityMods(cond.atkAbility, "atk", ctx); // 攻撃欄＝攻撃用の効果のみ
+  const dA = abilityMods(cond.defAbility, "def", ctx); // 防御欄＝防御用の効果のみ
   const aI = itemMods(cond.atkItem, ctx);
   const dI = itemMods(cond.defItem, ctx);
 

@@ -67,6 +67,25 @@ test("とくせいの倍率", () => {
   assert.deepEqual(abilityMods("Technician", { basePower: 80 }), {}); // 60超は無効
 });
 
+test("とくせいの攻守分離（取り違え防止）", () => {
+  // 防御専用（マルチスケイル）: 防御欄では効くが、攻撃欄では効かない
+  assert.deepEqual(abilityMods("Multiscale", "def", { defenderFullHp: true }), { dmg: 0.5 });
+  assert.deepEqual(abilityMods("Multiscale", "atk", { defenderFullHp: true }), {});
+  // 攻撃専用（ちからもち）: 攻撃欄では効くが、防御欄では効かない
+  assert.deepEqual(abilityMods("Huge Power", "atk", { physical: true }), { atkStat: 2 });
+  assert.deepEqual(abilityMods("Huge Power", "def", { physical: true }), {});
+  // てきおうりょくは攻撃側のみ
+  assert.deepEqual(abilityMods("Adaptability", "atk", {}), { stab: 2.0 });
+  assert.deepEqual(abilityMods("Adaptability", "def", {}), {});
+  // フィルターは防御側のみ
+  assert.deepEqual(abilityMods("Filter", "def", { typeEff: 2 }), { dmg: 0.75 });
+  assert.deepEqual(abilityMods("Filter", "atk", { typeEff: 2 }), {});
+  // 両側で効くみずのベール: 攻撃=水2倍 / 防御=炎半減
+  assert.deepEqual(abilityMods("Water Bubble", "atk", { moveType: "Water" }), { dmg: 2 });
+  assert.deepEqual(abilityMods("Water Bubble", "def", { moveType: "Fire" }), { dmg: 0.5 });
+  assert.deepEqual(abilityMods("Water Bubble", "atk", { moveType: "Fire" }), {}); // 攻撃側に炎の防御効果は出ない
+});
+
 test("持ち物の倍率", () => {
   const lifeOrb = { name: "Life Orb", description: "Holder's moves do 1.3x damage, but lose 10% HP after each hit." };
   assert.equal(itemMods(lifeOrb, { physical: true }).dmg, 1.3);
