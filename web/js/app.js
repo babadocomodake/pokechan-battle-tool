@@ -54,6 +54,26 @@ function typeBadges(types) {
   return el("span", { class: "types" }, types.map((t) =>
     el("span", { class: `type type-${t.toLowerCase()}` }, TYPE_JP[t] || t)));
 }
+// タイプ絞り込みチップ（複数選択OR）。対戦に無い「ステラ」は除外。
+// 返り値 { node, matches(types) }。onChange は選択が変わるたびに呼ばれる。
+function typeFilterChips(onChange) {
+  const types = (store.typechart?.types || []).filter((t) => t !== "Stellar");
+  const selected = new Set();
+  const chips = types.map((t) =>
+    el("button", { type: "button", class: `type type-${t.toLowerCase()} type-chip`, "aria-pressed": "false",
+      onclick: (e) => {
+        if (selected.has(t)) selected.delete(t); else selected.add(t);
+        e.currentTarget.setAttribute("aria-pressed", selected.has(t) ? "true" : "false");
+        onChange();
+      } }, TYPE_JP[t] || t));
+  const clear = el("button", { type: "button", class: "chip-btn type-chip-clear",
+    onclick: () => { selected.clear(); chips.forEach((c) => c.setAttribute("aria-pressed", "false")); onChange(); } }, "クリア");
+  const node = el("div", { class: "type-chips" }, [
+    el("span", { class: "type-chips-label" }, "タイプ:"), ...chips, clear,
+  ]);
+  // 選択が空なら全件通過。dual-type は「いずれか一致」で通す（OR）。
+  return { node, matches: (typeList) => selected.size === 0 || (typeList || []).some((t) => selected.has(t)) };
+}
 // 検索用の正規化: NFKC（全角→半角）→小文字→ひらがなをカタカナへ。
 // これで「りざ」「リザ」「riza」いずれでも部分一致できる。
 function normJa(s) {
@@ -145,6 +165,8 @@ function speedTab() {
   const search = el("input", { type: "search", placeholder: "ポケモン名で絞り込み（日本語/英語）", class: "search",
     oninput: (e) => { query = e.target.value.trim(); render(); } });
 
+  const typeChips = typeFilterChips(() => render());
+
   // すばやさ段階（0〜+6）
   const stageSel = el("select", { class: "stage-select",
     onchange: (e) => { mods.stage = parseInt(e.target.value, 10) || 0; render(); } },
@@ -164,6 +186,7 @@ function speedTab() {
   function render() {
     let rows = buildSpeedTable(store.legalPokemon, mods);
     if (query) rows = rows.filter((r) => pokeMatches(r, query));
+    rows = rows.filter((r) => typeChips.matches(r.types));
     const table = el("table", { class: "data-table" }, [
       el("thead", {}, el("tr", {}, [
         el("th", {}, "#"), el("th", {}, "ポケモン"), el("th", {}, "タイプ"),
@@ -187,7 +210,7 @@ function speedTab() {
 
   root.append(
     el("p", { class: "hint" }, "Lv50・個体値31固定。最速=SP32+性格補正↑、準速=SP32無補正、無振り=SP0。補正は表全体に適用（こだわりスカーフはメガには無効）。"),
-    search, toggles, tableWrap
+    search, typeChips.node, toggles, tableWrap
   );
   render();
   return root;
@@ -209,11 +232,13 @@ function usageTab() {
   const search = el("input", { type: "search", placeholder: "🔍 ひらがな/カタカナ/英字で絞り込み", class: "search",
     oninput: (e) => { query = e.target.value.trim(); render(); } });
 
+  const typeChips = typeFilterChips(() => render());
+
   const generalWrap = el("div", { class: "table-wrap" });
   const megaWrap = el("div", { class: "table-wrap" });
 
   function buildTable(list) {
-    const rows = query ? list.filter((p) => pokeMatches(p, query)) : list;
+    const rows = list.filter((p) => pokeMatches(p, query) && typeChips.matches(p.types));
     if (!rows.length) return el("p", { class: "hint" }, "該当なし");
     return el("table", { class: "data-table" }, [
       el("thead", {}, el("tr", {}, [
@@ -240,7 +265,7 @@ function usageTab() {
 
   root.append(
     el("p", { class: "hint" }, `出典: バトルデータベース（シングル・シーズン${store.usage?.season || store.regulation?.season || ""}）。使用率の高い順。各行「ダメ計で使う」で攻撃側に反映。`),
-    search,
+    search, typeChips.node,
     el("h3", { class: "fav-list-title" }, "一般ポケモン ランキング"),
     generalWrap,
     el("h3", { class: "fav-list-title" }, "メガシンカ ランキング"),
@@ -484,6 +509,8 @@ function damageTab(preset) {
   const cbCrit = el("input", { type: "checkbox", onchange: render });
   const cbBurn = el("input", { type: "checkbox", onchange: render });
   const cbAll = el("input", { type: "checkbox", onchange: render });
+  // 全技ダメ計のとき、技を「そのタイプ」で絞り込むチップ（複数選択OR）
+  const allTypeChips = typeFilterChips(render);
 
   [atkSP, defHpSP, defDefSP, remainHp].forEach((i) => i.addEventListener("input", render));
   atkNature.addEventListener("trichange", render);
@@ -595,7 +622,7 @@ function damageTab(preset) {
   }
 
   function renderAll(cond) {
-    const moves = attackingMovesFor(attacker);
+    const moves = attackingMovesFor(attacker).filter((m) => allTypeChips.matches([m.type]));
     const rows = moves.map((m) => ({ m, r: computeOne(attacker, defender, m, cond) }))
       .sort((a, b) => b.r.summary.pctMax - a.r.summary.pctMax);
     const table = el("table", { class: "data-table" }, [
@@ -614,7 +641,8 @@ function damageTab(preset) {
     ]);
     result.replaceChildren(
       el("div", { class: "dmg-detail" }, `${attacker.nameJp} → ${defender.nameJp}（覚える攻撃技を一括計算・与ダメ割合の高い順）`),
-      el("div", { class: "table-wrap" }, table),
+      allTypeChips.node,
+      rows.length ? el("div", { class: "table-wrap" }, table) : el("p", { class: "hint" }, "選択タイプの技がありません"),
     );
   }
 

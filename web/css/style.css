@@ -100,6 +100,15 @@ main { max-width: 920px; margin: 0 auto; padding: 12px 12px 32px; }
 .type-dragon{background:#7038f8;color:#fff}.type-dark{background:#705848;color:#fff}
 .type-steel{background:#b8b8d0}.type-fairy{background:#ee99ac}.type-stellar{background:#40b5a5;color:#fff}
 
+/* タイプ絞り込みチップ（複数選択OR）。未選択は薄く、選択中は枠線で強調 */
+.type-chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin: 8px 0; }
+.type-chips-label { font-size: .78rem; color: var(--dim); margin-right: 2px; }
+.type-chip { font-size: .74rem; padding: 4px 9px; border: 2px solid transparent; cursor: pointer; opacity: .42; transition: opacity .12s; }
+.type-chip:hover { opacity: .75; }
+.type-chip[aria-pressed="true"] { opacity: 1; border-color: var(--text); box-shadow: 0 0 0 1px var(--bg) inset; }
+.type-chip-clear { align-self: center; }
+@media (max-width: 600px) { .type-chip { min-height: 34px; } }
+
 /* ダメージ計算 */
 .dmg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
