@@ -1,0 +1,10 @@
+{
+  "name": "pokechan-battle-tool",
+  "version": "1.0.0",
+  "description": "Pokémon Champions 初心者向け対戦支援ツール",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"web/js/calc/*.test.js\""
+  }
+}

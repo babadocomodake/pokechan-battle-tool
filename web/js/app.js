@@ -14,7 +14,8 @@ const RECENT_DEF_KEY = "pokechamp.recentDefenders.v1";
 
 // タブのインデックスと、お気に入りから他タブを開くためのコントローラ
 // （tabs() に渡す配列の並びと必ず一致させること）
-const TAB = { SPEED: 0, USAGE: 1, DAMAGE: 2, SP: 3, FAV: 4, REVERSE: 5 };
+// タブ並びは「対戦中によく使う順」（ダメ計→素早さ→逆算→準備系）。indexはmain()のtabs配列と一致させること。
+const TAB = { DAMAGE: 0, SPEED: 1, REVERSE: 2, USAGE: 3, SP: 4, FAV: 5 };
 const nav = { open(_i, _preset) {} };
 
 // 性格の日本語名
@@ -469,20 +470,33 @@ function damageTab(preset) {
     const r = computeOne(attacker, defender, move, cond);
     const s = r.summary;
     const curHp = Math.max(1, Math.floor(r.maxHp * cond.remainPct / 100));
-    result.replaceChildren(
+    result.replaceChildren(el("div", {}, [
+      verdictBadge(r, curHp),
       el("div", { class: "dmg-headline" }, [
         el("span", { class: "dmg-num" }, `${s.min}〜${s.max}`),
         el("span", { class: "dmg-pct" }, `相手のHPを ${s.pctMin.toFixed(1)}〜${s.pctMax.toFixed(1)}% 削る`),
       ]),
-      el("div", { class: "dmg-ko " + (s.guaranteed === 1 ? "ko" : "") }, s.label),
       el("div", { class: "dmg-detail" }, [
         `${attacker.nameJp} の ${move.nameJp || move.name} → ${defender.nameJp}`, el("br"),
-        `相手HP実数値 ${r.maxHp}${cond.remainPct < 100 ? `（残り${cond.remainPct}% = ${curHp}）` : ""} ・ ${effLabelOf(r.eff, r.immune)}${r.stab > 1 ? ` ・ タイプ一致×${r.stab}` : ""}`,
+        `相手HP実数値 ${r.maxHp}${cond.remainPct < 100 ? `（残り${cond.remainPct}% = ${curHp}）` : ""} ・ ${effLabelOf(r.eff, r.immune)}${r.stab > 1 ? ` ・ タイプ一致×${r.stab}` : ""} ・ ${s.label}`,
       ]),
-      el("div", { class: "rolls-head" }, "乱数（ダメージ / 削れる割合 / 出る確率）"),
-      el("div", { class: "roll-grid" }, rollCells(r.rolls, r.maxHp, curHp)),
-      koLine(r.rolls, curHp),
-    );
+      el("details", { class: "rolls" }, [
+        el("summary", {}, "乱数をくわしく（ダメージ / 削れる割合 / 出る確率）"),
+        el("div", { class: "roll-grid" }, rollCells(r.rolls, r.maxHp, curHp)),
+        koLine(r.rolls, curHp),
+      ]),
+    ]));
+  }
+  // 結論を信号色で一目で。緑=確定で倒せる / 黄=乱数で倒せる / 赤=倒せない。
+  function verdictBadge(r, curHp) {
+    const s = r.summary;
+    if (r.immune) return el("div", { class: "verdict no" }, "効果なし（特性で無効）");
+    if (r.eff === 0 || s.max === 0) return el("div", { class: "verdict no" }, "効果なし（ダメージなし）");
+    const ko = r.rolls.filter((v) => v >= curHp).length;
+    if (s.guaranteed === 1) return el("div", { class: "verdict ok" }, "✓ 確定1発で倒せる");
+    if (ko > 0) return el("div", { class: "verdict maybe" }, `△ 乱数1発で倒せる（${(ko / r.rolls.length * 100).toFixed(0)}%）`);
+    if (s.guaranteed) return el("div", { class: "verdict no" }, `1発では落ちない（確定${s.guaranteed}発・最大${s.pctMax.toFixed(0)}%）`);
+    return el("div", { class: "verdict no" }, `${r.rolls.length}発でも倒せない（最大${s.pctMax.toFixed(0)}%）`);
   }
   // 乱数16通り（85〜100は各1/16で等確率）。丸めで同じダメージ値になる分を合算した確率を表示。
   function rollCells(rolls, maxHp, curHp) {
@@ -527,20 +541,31 @@ function damageTab(preset) {
     );
   }
 
-  const grid = el("div", { class: "dmg-grid" }, [
+  // コア入力（常時表示）: まずこの3つだけで結論が出る
+  const coreGrid = el("div", { class: "dmg-grid" }, [
     el("section", { class: "card" }, [
       el("h3", {}, "攻撃側"),
       labeled("ポケモン", atkSel),
       labeled("わざ", moveSel),
+    ]),
+    el("section", { class: "card" }, [
+      el("h3", {}, "防御側"),
+      labeled("ポケモン", defSel),
+      el("div", { class: "field" }, [el("label", {}, "最近使った防御"), defRecents]),
+    ]),
+  ]);
+
+  // 詳細設定（折りたたみ）: SP・性格・とくせい・持ち物・ランク・場・補正
+  const advGrid = el("div", { class: "dmg-grid" }, [
+    el("section", { class: "card" }, [
+      el("h4", { class: "card-sub" }, "攻撃側の詳細"),
       el("div", { class: "fav-row2" }, [labeled("攻撃SP(0-32)", atkSP), labeled("ランク補正", atkRankSel)]),
       labeled("性格補正", atkNature),
       labeled("とくせい", atkAbilSel),
       labeled("持ち物", atkItemSel),
     ]),
     el("section", { class: "card" }, [
-      el("h3", {}, "防御側"),
-      labeled("ポケモン", defSel),
-      el("div", { class: "field" }, [el("label", {}, "最近使った防御"), defRecents]),
+      el("h4", { class: "card-sub" }, "防御側の詳細"),
       el("div", { class: "fav-row2" }, [labeled("HP SP(0-32)", defHpSP), labeled("残りHP(%)", remainHp)]),
       el("div", { class: "fav-row2" }, [labeled("防御SP(0-32)", defDefSP), labeled("ランク補正", defRankSel)]),
       labeled("防御の性格補正", defNature),
@@ -549,7 +574,7 @@ function damageTab(preset) {
     ]),
   ]);
   const fieldRow = el("section", { class: "card" }, [
-    el("h3", {}, "場の状態"),
+    el("h4", { class: "card-sub" }, "場の状態"),
     el("div", { class: "sp-controls" }, [labeled("天候", weatherSel), labeled("フィールド", terrainSel), labeled("壁", screenSel)]),
   ]);
   const modRow = el("div", { class: "toggles" }, [
@@ -557,10 +582,16 @@ function damageTab(preset) {
     el("label", { class: "toggle" }, [cbBurn, " やけど(物理×0.5)"]),
     el("label", { class: "toggle" }, [cbAll, " 全技ダメ計（一括）"]),
   ]);
+  const moreDetails = el("details", { class: "more" }, [
+    el("summary", {}, "詳細設定（SP・性格・とくせい・持ち物・ランク・天候・壁・急所など）"),
+    advGrid, fieldRow, modRow,
+  ]);
 
+  // 結論を最上部に（モバイルでは画面上部に固定）→ 入力はその下
   root.append(
-    el("p", { class: "hint" }, "Lv50固定。ランク補正・天候・フィールド・壁・とくせい・持ち物に対応。とくせい/持ち物は任意（未選択=影響なし）。「計算未対応」表記の特性や接触/連続技依存の効果は反映されません。"),
-    grid, fieldRow, modRow, result
+    result,
+    el("p", { class: "hint" }, "相手と自分のポケモン・わざを選ぶだけで結論が出ます（攻撃SP最大・性格↑が初期値）。ランク補正・天候・壁・とくせい・持ち物は「詳細設定」で。「計算未対応」の特性や接触/連続技依存は反映されません。"),
+    coreGrid, moreDetails
   );
 
   // お気に入り/流行りから攻撃側プリセットを反映
@@ -1053,12 +1084,12 @@ async function main() {
   app.replaceChildren(
     regulationBanner(),
     tabs([
-      { label: "素早さ一覧", render: speedTab },
-      { label: "流行り", render: usageTab },
       { label: "ダメージ計算", render: damageTab },
+      { label: "素早さ一覧", render: speedTab },
+      { label: "逆算", render: reverseTab },
+      { label: "流行り", render: usageTab },
       { label: "SP配分", render: spTab },
       { label: "マイポケモン", render: favoritesTab },
-      { label: "逆算", render: reverseTab },
     ]),
   );
 }

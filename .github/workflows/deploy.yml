@@ -1,10 +1,11 @@
-name: Deploy web/ to GitHub Pages
+name: Test and Deploy to GitHub Pages
 
-# main ブランチに push するたびに web/ フォルダを GitHub Pages として公開する。
+# push / PR でテストを実行し、main への push ではテスト成功時のみ web/ を GitHub Pages へ公開する。
 # 手動実行（Actions 画面の Run workflow）も可能。
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -18,7 +19,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ① 計算エンジンの単体テスト（依存ゼロ・node:test）
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ソース取得
+        uses: actions/checkout@v4
+      - name: Node セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: テスト実行
+        run: npm test
+
+  # ② テスト成功時のみ公開（main への push のみ）
   deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -26,6 +43,10 @@ jobs:
     steps:
       - name: ソース取得
         uses: actions/checkout@v4
+      - name: 最新データを公開物へ同梱（data/ → web/data/）
+        run: |
+          rm -rf web/data
+          cp -r data web/data
       - name: Pages 設定
         uses: actions/configure-pages@v5
       - name: web/ を公開物としてアップロード

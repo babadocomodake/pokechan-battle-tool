@@ -114,6 +114,24 @@ main { max-width: 920px; margin: 0 auto; padding: 12px 12px 32px; }
 .data-table td.bad { color: var(--bad); font-weight: 700; }
 select:disabled { opacity: .85; border-style: dashed; }
 
+/* 結論バッジ（信号色で一目） */
+.verdict { font-weight: 800; font-size: 1.05rem; padding: 8px 12px; border-radius: 10px; margin-bottom: 8px; }
+.verdict.ok { background: rgba(52,211,153,.15); color: var(--good); border: 1px solid var(--good); }
+.verdict.maybe { background: rgba(255,216,77,.15); color: var(--hl); border: 1px solid var(--hl); }
+.verdict.no { background: rgba(248,113,113,.12); color: var(--bad); border: 1px solid var(--bad); }
+
+/* 詳細設定の折りたたみ */
+details.more, details.rolls { margin-top: 10px; }
+details.more > summary, details.rolls > summary {
+  cursor: pointer; color: var(--accent); font-size: .85rem; font-weight: 600;
+  padding: 8px 0; list-style: none;
+}
+details.more > summary::before, details.rolls > summary::before { content: "▸ "; }
+details.more[open] > summary::before, details.rolls[open] > summary::before { content: "▾ "; }
+details.more > summary::-webkit-details-marker, details.rolls > summary::-webkit-details-marker { display: none; }
+details.more .dmg-grid { margin-top: 6px; }
+.card-sub { margin: 0 0 8px; font-size: .82rem; color: var(--dim); }
+
 /* 検索付きポケモン選択（コンボボックス） */
 .poke-combo { position: relative; }
 .poke-search { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: .9rem; width: 100%; }
@@ -186,4 +204,22 @@ button.mini.danger { color: var(--bad); }
   .fav-list { grid-template-columns: 1fr; }
   .fav-move-grid { grid-template-columns: 1fr; }
   .site-header h1 { font-size: 1.1rem; }
+  /* ダメ計の結論を画面上部に固定（スクロールしても結論が見える） */
+  .dmg-result { position: sticky; top: 4px; z-index: 20; margin-top: 0; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+
+  /* タブを画面下に固定（親指で届くボトムナビ） */
+  .tabs {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+    margin: 0; gap: 0; padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+    background: var(--surface); border-top: 1px solid var(--line);
+  }
+  .tab-btn { border-radius: 8px; border: none; font-size: .66rem; padding: 6px 2px; white-space: nowrap; }
+  .tab-btn.active { background: var(--surface-2); border-bottom: none; color: var(--accent); }
+  /* ボトムナビに隠れないよう本文に余白 */
+  main { padding-bottom: 72px; }
+
+  /* タップ領域を最低44pxに（片手・誤タップ対策） */
+  .tab-btn { min-height: 48px; }
+  .tri, .chip-btn, button.mini, select, .search, .poke-search, .move-select { min-height: 44px; }
+  .toggle { min-height: 36px; }
 }
