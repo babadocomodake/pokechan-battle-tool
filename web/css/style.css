@@ -271,6 +271,16 @@ main { max-width: 920px; margin: 0 auto; padding: 14px 12px 32px; }
   font-family: inherit;
   box-shadow: inset 2px 2px 0 0 rgba(0,0,0,.45), 0 0 0 2px var(--line);
 }
+/* iOS Safari の type=search / select はネイティブ装飾で幅・角丸が崩れるため無効化し、
+   全入力の箱モデルを統一（はみ出し・幅広に見える問題の対策）。 */
+.search, select, .sp-input, .poke-search {
+  -webkit-appearance: none; appearance: none;
+  max-width: 100%; min-width: 0;
+}
+.poke-search::-webkit-search-decoration,
+.poke-search::-webkit-search-cancel-button,
+.search::-webkit-search-decoration,
+.search::-webkit-search-cancel-button { -webkit-appearance: none; }
 .sp-input { width: 70px; text-align: center; }
 .stage-select { width: auto; }
 .search { margin: 12px 0; }
@@ -323,6 +333,12 @@ main { max-width: 920px; margin: 0 auto; padding: 14px 12px 32px; }
 .card { background: var(--surface); border: 0; border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--frame); }
 .card h3 { margin: 0 0 10px; font-size: .92rem; color: var(--accent); letter-spacing: .03em; }
 .dmg-result { margin-top: 16px; background: var(--surface); border: 0; border-radius: var(--radius); padding: 16px; text-align: center; box-shadow: var(--frame); }
+.dmg-result:empty { display: none; }
+/* 結果の詳細（内訳・乱数・ログ追加）。固定はせず通常スクロール。空なら隠す。 */
+.dmg-result-more { margin-top: 10px; background: var(--surface); border: 0; border-radius: var(--radius); padding: 14px; box-shadow: var(--frame); }
+.dmg-result-more:empty { display: none; }
+.dmg-result-more .dmg-detail { margin-top: 0; }
+.dmg-result-more .fav-actions { justify-content: center; margin-top: 12px; }
 .dmg-headline { display: flex; gap: 8px; justify-content: center; align-items: baseline; flex-wrap: wrap; }
 .dmg-num { font-size: 1.9rem; font-weight: 800; color: var(--hl); text-shadow: 2px 2px 0 #061436; }
 .dmg-pct { color: var(--dim); }
@@ -429,6 +445,10 @@ button.mini.danger:hover { background: var(--bad); color: #fff; }
   .gba-screen { border-radius: 0; padding: 0; box-shadow: inset 0 0 18px rgba(0,0,0,.5); }
   .gba-screen::before { border-radius: 0; }
   .gba-screen::after { border-radius: 0; }
+  /* iPhone のノッチ/ダイナミックアイランド（内カメ）にヘッダーが隠れないよう、
+     セーフエリア分だけヘッダー上部に余白を足す（背景はノッチ下まで延びる）。 */
+  .site-header { padding-top: calc(16px + env(safe-area-inset-top)); }
+  main { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
 }
 
 @media (max-width: 480px) {
@@ -439,8 +459,13 @@ button.mini.danger:hover { background: var(--bad); color: #fff; }
   /* 狭い画面では御三家を小さくして上部中央寄りに（タイトルと重なり防止） */
   .header-mascots { position: static; justify-content: center; margin-bottom: 6px; gap: 6px; }
   .mascot { width: 40px; height: 40px; }
-  /* ダメ計の結論を画面上部に固定 */
-  .dmg-result { position: sticky; top: 4px; z-index: 20; margin-top: 0; }
+  /* ダメ計の結論を画面上部に固定。ただし「結論＋数値」だけのコンパクト表示にして
+     画面の大半を覆わないようにする（詳細は .dmg-result-more で非固定スクロール）。 */
+  .dmg-result { position: sticky; top: env(safe-area-inset-top); z-index: 20; margin-top: 0; padding: 8px 10px; }
+  .dmg-result .verdict { font-size: .85rem; padding: 6px 8px; margin-bottom: 6px; }
+  .dmg-result .dmg-num { font-size: 1.4rem; text-shadow: 1px 1px 0 #061436; }
+  .dmg-result .dmg-pct { font-size: .72rem; }
+  .dmg-result .dmg-headline { gap: 2px 8px; }
 
   /* タブを画面下に固定（親指で届くボトムナビ） */
   .tabs {

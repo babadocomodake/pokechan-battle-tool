@@ -616,7 +616,8 @@ function damageTab(preset) {
   defNatB.addEventListener("trichange", render);
   defNatD.addEventListener("trichange", render);
 
-  const result = el("div", { class: "dmg-result" });
+  const result = el("div", { class: "dmg-result" });       // 結論＋数値（モバイルでは上部に小さく固定）
+  const resultMore = el("div", { class: "dmg-result-more" }); // 内訳・乱数・ログ追加（非固定でスクロール）
 
   // --- #13 ダメージログ（防御固定で複数技を累積・セッション内のみ）---
   const logPanel = el("div", { class: "dmg-log" });
@@ -717,16 +718,20 @@ function damageTab(preset) {
     const cond = gatherCond();
     if (cbAll.checked) return renderAll(cond);
     const move = store.movesByName.get(moveSel.value);
-    if (!move) { result.replaceChildren(el("p", {}, "技データがありません")); return; }
+    if (!move) { result.replaceChildren(el("p", {}, "技データがありません")); resultMore.replaceChildren(); return; }
     const r = computeOne(attacker, defender, move, cond);
     const s = r.summary;
     const curHp = Math.max(1, Math.floor(r.maxHp * cond.remainPct / 100));
+    // 固定部：結論＋数値だけ（モバイルで画面を覆わないよう最小限）
     result.replaceChildren(el("div", {}, [
       verdictBadge(r, curHp),
       el("div", { class: "dmg-headline" }, [
         el("span", { class: "dmg-num" }, `${s.min}〜${s.max}`),
         el("span", { class: "dmg-pct" }, `相手のHPを ${s.pctMin.toFixed(1)}〜${s.pctMax.toFixed(1)}% 削る`),
       ]),
+    ]));
+    // 非固定部：内訳・乱数・ログ追加（スクロールして読む）
+    resultMore.replaceChildren(
       el("div", { class: "dmg-detail" }, [
         `${attacker.nameJp} の ${move.nameJp || move.name} → ${defender.nameJp}`, el("br"),
         `相手HP実数値 ${r.maxHp}${cond.remainPct < 100 ? `（残り${cond.remainPct}% = ${curHp}）` : ""} ・ ${effLabelOf(r.eff, r.immune)}${r.stab > 1 ? ` ・ タイプ一致×${r.stab}` : ""} ・ ${s.label}`,
@@ -742,7 +747,7 @@ function damageTab(preset) {
           renderLog();
         } }, "＋このダメージをログに追加"),
       ]),
-    ]));
+    );
   }
   // 結論を信号色で一目で。緑=確定で倒せる / 黄=乱数で倒せる / 赤=倒せない。
   function verdictBadge(r, curHp) {
@@ -792,7 +797,9 @@ function damageTab(preset) {
         el("td", { class: (r.summary.guaranteed === 1 ? "bad" : "") }, r.summary.label),
       ]))),
     ]);
-    result.replaceChildren(
+    // 全技一括は表が大きいので固定部は空にし、非固定部へ出す（画面を覆わない）
+    result.replaceChildren();
+    resultMore.replaceChildren(
       el("div", { class: "dmg-detail" }, `${attacker.nameJp} → ${defender.nameJp}（覚える攻撃技を一括計算・与ダメ割合の高い順）`),
       allTypeChips.node,
       rows.length ? el("div", { class: "table-wrap" }, table) : el("p", { class: "hint" }, "選択タイプの技がありません"),
@@ -871,6 +878,7 @@ function damageTab(preset) {
   // 結論を最上部に（モバイルでは画面上部に固定）→ 入力はその下
   root.append(
     result,
+    resultMore,
     logPanel,
     el("p", { class: "hint" }, "相手と自分のポケモン・わざを選ぶだけで結論が出ます（攻撃SP最大・性格↑が初期値）。ランク補正・天候・壁・とくせい・持ち物は「詳細設定」で。とくせいは最採用を既定表示。「＋ログに追加」で複数技を合算できます。"),
     coreGrid, moreDetails
