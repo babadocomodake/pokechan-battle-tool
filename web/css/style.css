@@ -481,11 +481,29 @@ button.mini.danger:hover { background: var(--bad); color: #fff; }
   .tab-btn { min-height: 48px; }
   .tri, .chip-btn, button.mini, select, .search, .poke-search, .move-select { min-height: 44px; }
   .toggle { min-height: 36px; }
+
+  /* 密度アップ：見える範囲を広げる（DotGothicは維持しサイズ・余白・字間だけ圧縮） */
+  body { letter-spacing: 0; line-height: 1.4; }
+  main { padding: 10px 10px 76px; }
+  .card { padding: 9px 10px; }
+  .card h3 { margin: 0 0 6px; font-size: .86rem; }
+  .field { margin-bottom: 7px; gap: 3px; }
+  .field > label { font-size: .72rem; }
+  .search, select, .sp-input, .poke-search { font-size: .84rem; padding: 8px 8px; }
+  .search { margin: 8px 0; }
+  .hint { font-size: .74rem; padding: 7px 9px; }
+  .reg-banner { padding: 7px 10px; margin-bottom: 10px; }
+  .dmg-grid { gap: 8px; }
+  /* ステッパーは小型化（▼▲0 32 を1行に） */
+  .sp-quick-wrap button.mini.sp-quick { min-width: 30px; min-height: 40px; padding: 6px 2px; font-size: .8rem; }
+  .sp-quick-wrap .sp-input { min-width: 44px; }
 }
 
 /* #3 ワンタップ入力 / #2 わざ検索 / #13 ダメージログ（GBA/LCDトークンを流用） */
-.sp-quick-wrap { display: flex; gap: 6px; align-items: center; }
-.sp-quick-wrap .sp-input { flex: 1 1 auto; }
+.sp-quick-wrap { display: flex; gap: 5px; align-items: center; }
+.sp-quick-wrap .sp-input { flex: 1 1 auto; width: auto; min-width: 56px; text-align: center; }
+/* ▼▲0 32 のステッパー：等幅・最小限の余白で1行に収める */
+.sp-quick-wrap button.mini.sp-quick { flex: 0 0 auto; min-width: 34px; padding: 6px 4px; text-align: center; }
 .sp-quick-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 2px 0 8px; }
 .sp-quick-label { font-size: .78rem; }
 button.mini.sp-quick { padding: 5px 10px; }

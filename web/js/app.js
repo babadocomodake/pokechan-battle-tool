@@ -527,11 +527,14 @@ function damageTab(preset) {
     const natState = (m) => (m > 1 ? "up" : m < 1 ? "down" : "neutral");
     return {
       pokemon: defender.name,
-      hpSp: clampSPVal(defHpSP.value), bSp: clampSPVal(defBSP.value), dSp: clampSPVal(defDSP.value),
-      natB: natState(defNatB.get()), natD: natState(defNatD.get()),
+      hpSp: clampSPVal(defHpSP.value), dSp: clampSPVal(defSP.value),
+      nat: natState(defNat.get()),
       item: defItemSel.disabled ? "" : (defItemSel.value || ""), ability: defAbilSel.value || "",
     };
   }
+  // 旧スナップ(bSp/dSp/natB/natD)からの後方互換読み出し。
+  function snapDefSp(s) { return s.dSp ?? s.bSp ?? 0; }
+  function snapDefNat(s) { return s.nat ?? s.natB ?? s.natD ?? "neutral"; }
   // 新規に防御ポケモンを確定。特性/持ち物はリセット、SP/性格は引き継ぎ、履歴先頭へ。
   function commitDefenderSelection(p) {
     defender = p; defSel.value = p.name;
@@ -545,8 +548,8 @@ function damageTab(preset) {
     const s = asSnap(e);
     const p = store.pokemonByName.get(s.pokemon); if (!p) return;
     defender = p; defSel.value = p.name;
-    defHpSP.value = String(s.hpSp ?? 0); defBSP.value = String(s.bSp ?? 0); defDSP.value = String(s.dSp ?? 0);
-    defNatB.set(s.natB || "neutral"); defNatD.set(s.natD || "neutral");
+    defHpSP.value = String(s.hpSp ?? 0); defSP.value = String(snapDefSp(s));
+    defNat.set(snapDefNat(s));
     fillAbilitySelect(defAbilSel, p); defAbilSel.value = s.ability || "";
     applyMega(defItemSel, p);
     if (s.item) { defItemSel.value = s.item; if (defItemSel.value !== s.item) defItemSel.value = ""; }
@@ -558,7 +561,7 @@ function damageTab(preset) {
   function defSnapSummary(s, p) {
     if (s.hpSp == null && s.bSp == null && s.dSp == null && !s.item && !s.ability) return "";
     const arrow = (v) => (v === "up" ? "↑" : v === "down" ? "↓" : "");
-    const parts = [`H${s.hpSp || 0} B${s.bSp || 0}${arrow(s.natB)} D${s.dSp || 0}${arrow(s.natD)}`];
+    const parts = [`H${s.hpSp || 0} 防${snapDefSp(s)}${arrow(snapDefNat(s))}`];
     if (s.ability && p) { const i = (p.abilities || []).indexOf(s.ability); parts.push(i >= 0 ? (p.abilitiesJp?.[i] || s.ability) : s.ability); }
     if (s.item) parts.push(store.itemsByName.get(s.item)?.nameJp || s.item);
     return parts.join(" / ");
@@ -582,10 +585,9 @@ function damageTab(preset) {
   attacker = store.pokemonByName.get(atkSel.value);
   defender = store.pokemonByName.get(defSel.value);
   const defHpSP = spInput(0, "def-hp-sp");
-  const defBSP = spInput(0, "def-b-sp");   // 防御(B)への努力値
-  const defDSP = spInput(0, "def-d-sp");   // 特防(D)への努力値
-  const defNatB = natureTriToggle("neutral"); // 防御の性格補正
-  const defNatD = natureTriToggle("neutral"); // 特防の性格補正
+  // 防御は B/D に分けず単一の「防御振り」に統一（技の物理/特殊で内部的に def/spd を使う）。
+  const defSP = spInput(0, "def-sp");      // 防御への努力値（単一）
+  const defNat = natureTriToggle("neutral"); // 防御の性格補正（単一）
   const defRankSel = rankSelect(render);
   const defAbilSel = el("select", { class: "abil-select", onchange: render });
   const defItemSel = realItemSelect("def", render);
@@ -611,10 +613,9 @@ function damageTab(preset) {
   // 全技ダメ計のとき、技を「そのタイプ」で絞り込むチップ（複数選択OR）
   const allTypeChips = typeFilterChips(render);
 
-  [atkSP, defHpSP, defBSP, defDSP, remainHp].forEach((i) => i.addEventListener("input", render));
+  [atkSP, defHpSP, defSP, remainHp].forEach((i) => i.addEventListener("input", render));
   atkNature.addEventListener("trichange", render);
-  defNatB.addEventListener("trichange", render);
-  defNatD.addEventListener("trichange", render);
+  defNat.addEventListener("trichange", render);
 
   const result = el("div", { class: "dmg-result" });       // 結論＋数値（モバイルでは上部に小さく固定）
   const resultMore = el("div", { class: "dmg-result-more" }); // 内訳・乱数・ログ追加（非固定でスクロール）
@@ -694,9 +695,8 @@ function damageTab(preset) {
   function gatherCond() {
     return {
       atkSP: clampSPVal(atkSP.value), atkNat: atkNature.get(),
-      // 防御は B/D 別々に渡す。computeOne が技の物理/特殊で当たる方を使う。
-      defBsp: clampSPVal(defBSP.value), defBnat: defNatB.get(),
-      defDsp: clampSPVal(defDSP.value), defDnat: defNatD.get(),
+      // 防御は単一の防御振り＋性格。computeOne が技の物理/特殊で def/spd を内部選択。
+      defSP: clampSPVal(defSP.value), defNat: defNat.get(),
       defHpSP: clampSPVal(defHpSP.value),
       atkRank: parseInt(atkRankSel.value, 10) || 0, defRank: parseInt(defRankSel.value, 10) || 0,
       atkAbility: atkAbilSel.value, defAbility: defAbilSel.value,
@@ -824,13 +824,20 @@ function damageTab(preset) {
     ]),
   ]);
 
-  // --- #3 ワンタップ入力 ---
+  // --- #3 ワンタップ入力 ＋ ステッパー（▼ ▲ 0 32） ---
   const setSP = (input, val) => { input.value = String(val); input.dispatchEvent(new Event("input")); };
+  const stepSP = (input, delta) => setSP(input, clampSPVal((parseInt(input.value, 10) || 0) + delta));
   const quick = (label, title, onClick) => el("button", { type: "button", class: "mini sp-quick", title, onclick: onClick }, label);
-  // 数値SP欄の横に「32」ボタンを添える
+  // 数値SP欄に ▼▲（1ずつ）／0／32 を併設（GameWith風）
   const labeledSP = (label, input) => el("div", { class: "field" }, [
     el("label", {}, label),
-    el("div", { class: "sp-quick-wrap" }, [input, quick("32", "最大(32)にする", () => { setSP(input, SP_MAX_PER_STAT); render(); })]),
+    el("div", { class: "sp-quick-wrap" }, [
+      input,
+      quick("▼", "1減らす", () => stepSP(input, -1)),
+      quick("▲", "1増やす", () => stepSP(input, +1)),
+      quick("0", "0にする", () => setSP(input, 0)),
+      quick("32", "最大(32)にする", () => setSP(input, SP_MAX_PER_STAT)),
+    ]),
   ]);
   // 攻撃側プリセット（攻撃ステの投資量＝ダメ計に素早さは不使用）
   const atkPresets = el("div", { class: "sp-quick-row" }, [
@@ -844,18 +851,17 @@ function damageTab(preset) {
   const advGrid = el("div", { class: "dmg-grid" }, [
     el("section", { class: "card" }, [
       el("h4", { class: "card-sub" }, "攻撃側の詳細"),
-      el("div", { class: "fav-row2" }, [labeledSP("攻撃SP(0-32)", atkSP), labeled("ランク補正", atkRankSel)]),
+      labeledSP("攻撃振り", atkSP),
       atkPresets,
-      labeled("性格補正", atkNature),
+      el("div", { class: "fav-row2" }, [labeled("性格補正", atkNature), labeled("ランク補正", atkRankSel)]),
       labeled("とくせい", atkAbilSel),
       labeled("持ち物", atkItemSel),
     ]),
     el("section", { class: "card" }, [
       el("h4", { class: "card-sub" }, "防御側の詳細"),
-      el("div", { class: "fav-row2" }, [labeledSP("HP SP(0-32)", defHpSP), labeled("残りHP(%)", remainHp)]),
-      el("p", { class: "hint" }, "防御(B)=物理技を受ける時／特防(D)=特殊技を受ける時に使われます。"),
-      el("div", { class: "fav-row2" }, [labeledSP("防御SP(0-32)", defBSP), labeledSP("特防SP(0-32)", defDSP)]),
-      el("div", { class: "fav-row2" }, [labeled("防御の性格補正", defNatB), labeled("特防の性格補正", defNatD)]),
+      labeledSP("HP振り", defHpSP),
+      labeledSP("防御振り", defSP),
+      el("div", { class: "fav-row2" }, [labeled("性格補正", defNat), labeled("残りHP(%)", remainHp)]),
       labeled("ランク補正", defRankSel),
       labeled("とくせい", defAbilSel),
       labeled("持ち物", defItemSel),
@@ -880,7 +886,7 @@ function damageTab(preset) {
     result,
     resultMore,
     logPanel,
-    el("p", { class: "hint" }, "相手と自分のポケモン・わざを選ぶだけで結論が出ます（攻撃SP最大・性格↑が初期値）。ランク補正・天候・壁・とくせい・持ち物は「詳細設定」で。とくせいは最採用を既定表示。「＋ログに追加」で複数技を合算できます。"),
+    el("p", { class: "hint" }, "ポケモンとわざを選ぶだけで結論が出ます。細かい調整は「詳細設定」。"),
     coreGrid, moreDetails
   );
 
