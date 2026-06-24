@@ -8,14 +8,16 @@
 from __future__ import annotations
 
 import html as html_lib
+import json
 import re
 import unicodedata
 import urllib.request
 from pathlib import Path
 
 USAGE_LIST_URL = "https://champs.pokedb.tokyo/pokemon/list"
-# season=2 が シーズンM-2。rule=0 シングル / rule=1 ダブル。切替時に更新。
-CURRENT_SEASON_PARAM = 2
+USAGE_SHOW_URL = "https://champs.pokedb.tokyo/pokemon/show"  # 個別ページ（採用率の一次源）
+# season=3 が シーズンM-3(M-B)。rule=0 シングル / rule=1 ダブル。切替時に更新。
+CURRENT_SEASON_PARAM = 3
 USER_AGENT = "Mozilla/5.0 (compatible; pokechamp-helper/0.1; usage sync)"
 MIN_EXPECTED_ROWS = 100
 
@@ -79,7 +81,72 @@ def make_rank_lookup(pairs: list[tuple[int, str]]):
     return lookup
 
 
+# ── 個別ページの採用率（#5 とくせい自動 / わざ並び順 用）─────────────────────
+# 採用率は静的HTML内に HTMLエスケープJSONで埋め込まれている:
+#   とくせい: x-data="window.usagePieChart([{...,"name":"さめはだ","rate":99.2},...])"
+#   わざ    : move-detail="{...,"name":"じしん","rate":99.6,...}"
+# 内側の引用符は &quot; なので、属性値は [^"]* で安全に取り出せる。
+_ABIL_RE = re.compile(r'usagePieChart\((\[[^"]*?\])\)', re.S)
+_MOVE_RE = re.compile(r'move-detail="([^"]*)"')
+
+
+def _fetch_show(dex: int, form: int, rule: int, cache_dir: Path | None, force: bool) -> str:
+    cache = (cache_dir / f"pokedb_show_{dex:04d}-{form:02d}_r{rule}.html") if cache_dir else None
+    if cache and cache.exists() and not force:
+        return cache.read_text(encoding="utf-8", errors="replace")
+    url = f"{USAGE_SHOW_URL}/{dex:04d}-{form:02d}?season={CURRENT_SEASON_PARAM}&rule={rule}"
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+    if cache:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(raw, encoding="utf-8")
+    return raw
+
+
+def fetch_adoption(dex: int, form: int = 0, rule: int = 0,
+                   cache_dir: Path | None = None, force: bool = False) -> dict:
+    """種(図鑑番号+形態)の採用率を返す。
+    戻り値: {"abilities": [(日本語名, rate), ...], "moves": [(日本語名, rate), ...]}（rate降順）。
+    取得失敗・データ無しは空リスト（呼び出し側で非致命に扱う）。
+    """
+    try:
+        html_text = _fetch_show(dex, form, rule, cache_dir, force)
+    except Exception:
+        return {"abilities": [], "moves": []}
+
+    abilities: list[tuple[str, float]] = []
+    m = _ABIL_RE.search(html_text)
+    if m:
+        try:
+            for e in json.loads(html_lib.unescape(m.group(1))):
+                if e.get("name") and e.get("rate") is not None:
+                    abilities.append((html_lib.unescape(str(e["name"])).strip(), float(e["rate"])))
+        except Exception:
+            pass
+
+    moves: list[tuple[str, float]] = []
+    seen: set[str] = set()
+    for raw in _MOVE_RE.findall(html_text):
+        try:
+            e = json.loads(html_lib.unescape(raw))
+        except Exception:
+            continue
+        name = html_lib.unescape(str(e.get("name", ""))).strip()
+        if not name or name in seen or e.get("rate") is None:
+            continue
+        seen.add(name)
+        moves.append((name, float(e["rate"])))
+
+    abilities.sort(key=lambda x: -x[1])
+    moves.sort(key=lambda x: -x[1])
+    return {"abilities": abilities, "moves": moves}
+
+
 if __name__ == "__main__":
     for rule, label in [(0, "single"), (1, "double")]:
         pairs = fetch_usage(rule, cache_dir=Path("data/raw"))
         print(f"{label}: {len(pairs)} rows. top5:", pairs[:5])
+    ad = fetch_adoption(445, 0, 0, cache_dir=Path("data/raw"))
+    print("Garchomp abilities:", ad["abilities"])
+    print("Garchomp top moves:", ad["moves"][:5])

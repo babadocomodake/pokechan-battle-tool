@@ -17,12 +17,18 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SEREBII_REGULATION_URL = "https://www.serebii.net/pokemonchampions/rankedbattle/regulationm-a.shtml"
+SEREBII_REGULATION_URL = "https://www.serebii.net/pokemonchampions/rankedbattle/regulationm-b.shtml"
+# Serebiiの各レギュレーションページは「前レギュからの差分（追加分）」を載せる作り。
+# 現行(M-B)の合法 = M-A（基礎一覧）∪ M-B（追加分）。切替時は末尾に新ページを足す。
+SEREBII_REGULATION_SOURCES = [
+    "https://www.serebii.net/pokemonchampions/rankedbattle/regulationm-a.shtml",
+    "https://www.serebii.net/pokemonchampions/rankedbattle/regulationm-b.shtml",
+]
 OFFICIAL_BATTLE_URL = "https://www.pokemonchampions.jp/ja/battle/"
 
 # 現レギュレーション識別子（切替時はここと URL を更新する）
-CURRENT_REGULATION = "M-A"
-CURRENT_SEASON = "M-2"
+CURRENT_REGULATION = "M-B"
+CURRENT_SEASON = "M-3"
 
 USER_AGENT = "Mozilla/5.0 (compatible; pokechamp-helper/0.1; data sync)"
 
@@ -60,6 +66,15 @@ LEGAL_ITEMS = [
     "Sitrus Berry", "Skarmorite", "Slowbronite", "Soft Sand", "Spell Tag", "Starminite",
     "Steelixite", "Tanga Berry", "Twisted Spoon", "Tyranitarite", "Venusaurite", "Victreebelite",
     "Wacan Berry", "White Herb", "Yache Berry",
+    # ── Regulation M-B 追加（2026/6 シーズンM-3）──────────────────────────
+    # 新メガストーン16種（M-Bで解禁。英語名は data/items.json の name 表記）
+    "Barbaracite", "Blazikenite", "Dragalgite", "Eelektrossite", "Falinksite", "Malamarite",
+    "Mawilite", "Metagrossite", "Pyroarite", "Raichunite X", "Raichunite Y", "Sceptilite",
+    "Scolipite", "Scraftinite", "Staraptite", "Swampertite",
+    # 新戦闘アイテム15種（いのちのたま・たつじんのおび 等のダメージ直結品が解禁）
+    "Big Root", "Damp Rock", "Expert Belt", "Heat Rock", "Icy Rock", "Iron Ball", "Life Orb",
+    "Light Clay", "Metronome", "Muscle Band", "Shed Shell", "Smooth Rock", "Wide Lens",
+    "Wise Glasses", "Zoom Lens",
 ]
 
 # Serebii のページ構造変化を検知するための健全性しきい値
@@ -130,10 +145,17 @@ def parse_regulation(html: str) -> list[LegalForm]:
 
 
 def fetch_regulation(cache_dir: Path | None = None, force: bool = False) -> Regulation:
-    """Serebii から現レギュレーションの合法フォーム一覧を取得して返す。"""
-    cache_path = (cache_dir / "serebii_reg.html") if cache_dir else None
-    html = _fetch(SEREBII_REGULATION_URL, cache_path, force)
-    legal_forms = parse_regulation(html)
+    """Serebii から現レギュレーションの合法フォーム一覧（M-A基礎∪M-B追加）を取得して返す。"""
+    legal_forms: list[LegalForm] = []
+    seen: set[str] = set()
+    for idx, url in enumerate(SEREBII_REGULATION_SOURCES):
+        cache_path = (cache_dir / f"serebii_reg_{idx}.html") if cache_dir else None
+        html = _fetch(url, cache_path, force)
+        for f in parse_regulation(html):
+            if f.name_en in seen:
+                continue
+            seen.add(f.name_en)
+            legal_forms.append(f)
     if len(legal_forms) < MIN_EXPECTED_FORMS:
         raise RuntimeError(
             f"Serebii の合法フォーム数が想定より少ない ({len(legal_forms)} < {MIN_EXPECTED_FORMS})。"

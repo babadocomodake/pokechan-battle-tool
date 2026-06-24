@@ -6,7 +6,7 @@ import { statStageMultiplier } from "./calc/stages.js";
 import { computeDamage, typeEffectiveness, stabMultiplier, summarize } from "./calc/damage.js";
 import {
   WEATHERS, TERRAINS, SCREENS, weatherDamageMult, weatherDefStatMult,
-  terrainDamageMult, screenMult, abilityMods, itemMods, isAbilitySupported, itemRole,
+  terrainDamageMult, screenMult, abilityMods, itemMods, isAbilitySupported, itemRole, ateConversion,
 } from "./calc/modifiers.js";
 import { loadFavorites, upsertFavorite, removeFavorite, genId, emptySpread, loadRecent, pushRecent, upsertRecentSnap, syncRecentSnapFront } from "./favorites.js";
 
@@ -316,14 +316,39 @@ function holdableItems() {
 function roleItems(side) {
   return holdableItems().filter((it) => itemRole(it)[side]);
 }
-// ダメ計用の持ち物セレクト。side で攻/防の効果あり道具のみに絞り、効果文を併記する。
+// 持ち物のカテゴリ分類（optgroupの見出し）。計算ロジック(itemRole)と item.category で判定。
+const ITEM_GROUP_ORDER = {
+  atk: ["威力アップ", "こだわり", "タイプ強化（×1.2）", "専用", "その他"],
+  def: ["耐久", "その他"],
+};
+function itemGroup(it, side) {
+  const r = itemRole(it);
+  const name = it.name;
+  if (side === "atk") {
+    if (name === "Light Ball" || name === "Thick Club") return "専用";
+    if (/こだわり/.test(r.jp)) return "こだわり";
+    if (it.category === "type-enhancement" || /タイプの技/.test(r.jp)) return "タイプ強化（×1.2）";
+    return "威力アップ"; // 残りの攻撃寄与（いのちのたま/おび/ハチマキ/メガネ等）
+  }
+  return "耐久"; // 防御寄与（チョッキ/きせき等）
+}
+// ダメ計用の持ち物セレクト。side で攻/防の効果あり道具のみに絞り、カテゴリ別optgroupで表示。
 function realItemSelect(side, onChange) {
-  const opts = [el("option", { value: "" }, "道具なし"),
-    ...roleItems(side).map((it) => {
+  const order = ITEM_GROUP_ORDER[side] || ["その他"];
+  const buckets = new Map(order.map((g) => [g, []]));
+  for (const it of roleItems(side)) {
+    (buckets.get(itemGroup(it, side)) || buckets.get("その他")).push(it);
+  }
+  const sel = el("select", { class: "item-select", onchange: onChange }, [el("option", { value: "" }, "道具なし")]);
+  for (const g of order) {
+    const items = buckets.get(g);
+    if (!items || !items.length) continue;
+    sel.appendChild(el("optgroup", { label: g }, items.map((it) => {
       const r = itemRole(it);
       return el("option", { value: it.name }, r.jp ? `${it.nameJp}（${r.jp}）` : it.nameJp);
-    })];
-  return el("select", { class: "item-select", onchange: onChange }, opts);
+    })));
+  }
+  return sel;
 }
 // ランク補正セレクト(+6〜-6)
 function rankSelect(onChange) {
@@ -333,17 +358,28 @@ function rankSelect(onChange) {
   s.value = "0";
   return s;
 }
-// 指定ポケモンの候補特性でセレクトを埋める（既定=なし）。計算未対応の特性は注記。
+// 特性の効果文（abilities.json）を名前→説明でひく（初回だけMap化）。
+let _abilDescMap = null;
+function abilDesc(name) {
+  if (!_abilDescMap) _abilDescMap = new Map((store.abilities || []).map((a) => [a.name, a.description]));
+  return _abilDescMap.get(name) || "";
+}
+// 指定ポケモンの候補特性でセレクトを埋める。既定は最採用とくせい(topAbility)。
+// 各選択肢に効果文ツールチップ(title)を付与。計算未対応の特性は注記。
 function fillAbilitySelect(sel, pokemon) {
   const abils = pokemon.abilities || [];
   const jp = pokemon.abilitiesJp || [];
   const opts = [el("option", { value: "" }, "特性なし／影響なし")];
   abils.forEach((a, i) => {
     const supp = isAbilitySupported(a) ? "" : "（計算未対応）";
-    opts.push(el("option", { value: a }, `${jp[i] || a}${supp}`));
+    const o = el("option", { value: a }, `${jp[i] || a}${supp}`);
+    const d = abilDesc(a);
+    if (d) o.title = d;
+    opts.push(o);
   });
   sel.replaceChildren(...opts);
-  sel.value = "";
+  // 既定＝最採用とくせい。無ければ第一とくせい（「影響なし」にはしない）。
+  sel.value = pokemon.topAbility && abils.includes(pokemon.topAbility) ? pokemon.topAbility : (abils[0] || "");
 }
 function fieldSelect(list, onChange) {
   return el("select", { onchange: onChange }, list.map((o) => el("option", { value: o.id }, o.label)));
@@ -354,7 +390,11 @@ function computeOne(attacker, defender, move, cond) {
   const physical = move.category === "Physical";
   const atkKey = physical ? "atk" : "spa";
   const defKey = physical ? "def" : "spd";
-  const eff = typeEffectiveness(move.type, defender.types, store.typechart.chart);
+  // -ate特性（スカイスキン等）でわざタイプが変わるなら、相性/一致の前に反映。
+  const ate = ateConversion(cond.atkAbility, move.type);
+  const moveType = ate ? ate.type : move.type;
+  const ateBoost = ate ? ate.boost : 1;
+  const eff = typeEffectiveness(moveType, defender.types, store.typechart.chart);
 
   let atkStat = calcStat(attacker.base[atkKey], cond.atkSP, atkKey, cond.atkNat);
   // 防御は B(防御)/D(特防) を分けて持てる。技の物理/特殊で当たる方を使う。
@@ -364,9 +404,13 @@ function computeOne(attacker, defender, move, cond) {
   let defStat = calcStat(defender.base[defKey], defInvest, defKey, defNat);
   const maxHp = calcStat(defender.base.hp, cond.defHpSP, "hp", 1.0);
 
+  const f = move.flags || {};
   const ctx = {
-    physical, moveType: move.type, moveName: move.name, attackerName: attacker.name,
+    physical, moveType, moveName: move.name, attackerName: attacker.name,
     typeEff: eff, defenderFullHp: cond.remainPct >= 100, basePower: move.power,
+    // わざフラグ（とくせい全網羅の判定材料）
+    contact: !!f.contact, punch: !!f.punch, bite: !!f.bite, pulse: !!f.pulse,
+    sound: !!f.sound, hasSecondary: !!move.hasSecondary, recoil: !!move.isRecoil, crit: !!cond.crit,
   };
   const aA = abilityMods(cond.atkAbility, "atk", ctx); // 攻撃欄＝攻撃用の効果のみ
   const dA = abilityMods(cond.defAbility, "def", ctx); // 防御欄＝防御用の効果のみ
@@ -385,12 +429,13 @@ function computeOne(attacker, defender, move, cond) {
   if (defStatMult !== 1) defStat = Math.floor(defStat * defStatMult);
   defStat = Math.max(1, defStat);
 
-  const stab = aA.stab ? aA.stab : stabMultiplier(move.type, attacker.types);
+  const stab = aA.stab ? aA.stab : stabMultiplier(moveType, attacker.types);
   const immune = !!dA.immune;
-  const weatherMult = weatherDamageMult(cond.weather, move.type);
+  const weatherMult = weatherDamageMult(cond.weather, moveType);
   const chainMults = [
-    terrainDamageMult(cond.terrain, move.type, move.name),
+    terrainDamageMult(cond.terrain, moveType, move.name),
     screenMult(cond.screen, physical, cond.crit),
+    ateBoost,
     aA.dmg || 1, dA.dmg || 1, aI.dmg || 1, dI.dmg || 1,
   ];
   const burn = physical && cond.burn;
@@ -409,6 +454,9 @@ function damageTab(preset) {
   // 攻撃側
   const atkSel = pokemonSelect((p) => { attacker = p; pushRecent(RECENT_ATK_KEY, p.name, RECENT_CAP); renderAtkRecents(); refreshMoves(); fillAbilitySelect(atkAbilSel, p); applyMega(atkItemSel, p); render(); }, "atk-poke");
   const moveSel = el("select", { class: "move-select", onchange: render });
+  // #2 わざ検索（かな/英/部分一致でわざ欄を絞り込み）
+  const moveSearch = el("input", { type: "search", class: "search move-search", placeholder: "🔍 わざ名で絞り込み（かな/英）",
+    oninput: () => refreshMoves(moveSearch.value) });
   const atkSP = spInput(SP_MAX_PER_STAT, "atk-sp");
   const atkNature = natureTriToggle("up");
   const atkRankSel = rankSelect(render);
@@ -489,6 +537,7 @@ function damageTab(preset) {
     defender = p; defSel.value = p.name;
     fillAbilitySelect(defAbilSel, p); applyMega(defItemSel, p);
     upsertRecentSnap(RECENT_DEF_KEY, defSnapshot(), RECENT_CAP);
+    resetLog(); // 防御を変えたらログは整合のためクリア
     renderRecents(); render();
   }
   // 履歴スナップショットを防御側にまるごと復元。
@@ -502,6 +551,7 @@ function damageTab(preset) {
     applyMega(defItemSel, p);
     if (s.item) { defItemSel.value = s.item; if (defItemSel.value !== s.item) defItemSel.value = ""; }
     upsertRecentSnap(RECENT_DEF_KEY, defSnapshot(), RECENT_CAP);
+    resetLog();
     renderRecents(); render();
   }
   // 履歴チップの詳細行（SP/性格/持ち物/特性の要約）。旧データ(名前のみ)は空。
@@ -568,6 +618,34 @@ function damageTab(preset) {
 
   const result = el("div", { class: "dmg-result" });
 
+  // --- #13 ダメージログ（防御固定で複数技を累積・セッション内のみ）---
+  const logPanel = el("div", { class: "dmg-log" });
+  const logEntries = []; // { name, min, max, maxHp, include }
+  function renderLog() {
+    if (!logEntries.length) { logPanel.replaceChildren(); return; }
+    const inc = logEntries.filter((e) => e.include);
+    const sumMin = inc.reduce((s, e) => s + e.min, 0);
+    const sumMax = inc.reduce((s, e) => s + e.max, 0);
+    const hp = (inc.length ? inc[inc.length - 1] : logEntries[logEntries.length - 1]).maxHp;
+    let cls = "no", txt = `✕ 合計でも倒せない（合計${sumMin}〜${sumMax} / 相手HP${hp}）`;
+    if (sumMin >= hp) { cls = "ok"; txt = `✓ 合計で確定で倒せる（${inc.length}発・合計${sumMin}〜${sumMax} / 相手HP${hp}）`; }
+    else if (sumMax >= hp) { cls = "maybe"; txt = `△ 合計で乱数で倒せる（合計${sumMin}〜${sumMax} / 相手HP${hp}）`; }
+    logPanel.replaceChildren(
+      el("h4", { class: "card-sub" }, "ダメージログ（防御固定で複数技を合算）"),
+      el("div", { class: "verdict " + cls }, txt),
+      el("ul", { class: "log-list" }, logEntries.map((e, i) => el("li", { class: "log-item" + (e.include ? "" : " off") }, [
+        el("label", {}, [
+          el("input", { type: "checkbox", checked: e.include ? "checked" : null,
+            onchange: (ev) => { e.include = ev.target.checked; renderLog(); } }),
+          ` ${e.name}：${e.min}〜${e.max}`,
+        ]),
+        el("button", { type: "button", class: "mini danger", onclick: () => { logEntries.splice(i, 1); renderLog(); } }, "削除"),
+      ]))),
+      el("button", { type: "button", class: "mini", onclick: () => { logEntries.length = 0; renderLog(); } }, "ログを全消去"),
+    );
+  }
+  function resetLog() { logEntries.length = 0; renderLog(); }
+
   // メガ個体なら持ち物をメガストーンに固定。非メガなら解除。
   function applyMega(itemSel, p) {
     if (p.form === "Mega" && p.megaStone) {
@@ -582,21 +660,34 @@ function damageTab(preset) {
     }
   }
 
-  function refreshMoves() {
-    const list = attackingMovesFor(attacker);
-    const order = store.typechart?.types || [];
-    const byType = new Map();
-    for (const m of list) {
-      if (!byType.has(m.type)) byType.set(m.type, []);
-      byType.get(m.type).push(m);
-    }
-    const types = [...byType.keys()].sort((a, b) => order.indexOf(a) - order.indexOf(b));
-    const groups = types.map((t) => {
-      const moves = byType.get(t).sort((a, b) => (b.power || 0) - (a.power || 0));
-      return el("optgroup", { label: TYPE_JP[t] || t }, moves.map((m) =>
-        el("option", { value: m.name }, `${m.nameJp || m.name}（${m.category === "Physical" ? "物理" : "特殊"}/威力${m.power}）`)));
-    });
+  // 攻撃側の図鑑番号に対応するわざ採用率（日本語技名→%）。
+  function moveAdoption() {
+    return (store.usage?.moveAdoptionByDex || {})[String(attacker.dexNumber)] || {};
+  }
+  // #2: 物理/特殊で分け→各群「タイプ一致(★)を上→採用率降順→威力降順」。検索で部分一致フィルタ。
+  function refreshMoves(query = "") {
+    const adopt = moveAdoption();
+    const q = (query || "").trim();
+    let list = attackingMovesFor(attacker);
+    if (q) list = list.filter((m) => normJa(m.nameJp || "").includes(normJa(q)) || normJa(m.name).includes(normJa(q)));
+    const isStab = (m) => (attacker.types || []).includes(m.type);
+    const rateOf = (m) => (adopt[m.nameJp] ?? adopt[m.name] ?? -1);
+    const sortFn = (a, b) => (isStab(b) - isStab(a)) || (rateOf(b) - rateOf(a)) || ((b.power || 0) - (a.power || 0));
+    const optFor = (m) => {
+      const r = rateOf(m);
+      const label = `${isStab(m) ? "★" : ""}${m.nameJp || m.name}（威${m.power}${r >= 0 ? ` 採用${r}%` : ""}）`;
+      const o = el("option", { value: m.name }, label);
+      o.style.color = isStab(m) ? "" : "";
+      return o;
+    };
+    const groups = [];
+    const phys = list.filter((m) => m.category === "Physical").sort(sortFn);
+    const spec = list.filter((m) => m.category === "Special").sort(sortFn);
+    if (phys.length) groups.push(el("optgroup", { label: "物理わざ（★=タイプ一致／採用率順）" }, phys.map(optFor)));
+    if (spec.length) groups.push(el("optgroup", { label: "特殊わざ（★=タイプ一致／採用率順）" }, spec.map(optFor)));
+    const cur = moveSel.value;
     moveSel.replaceChildren(...groups);
+    if ([...moveSel.options].some((o) => o.value === cur)) moveSel.value = cur;
   }
 
   function gatherCond() {
@@ -644,6 +735,12 @@ function damageTab(preset) {
         el("summary", {}, "乱数をくわしく（ダメージ / 削れる割合 / 出る確率）"),
         el("div", { class: "roll-grid" }, rollCells(r.rolls, r.maxHp, curHp)),
         koLine(r.rolls, curHp),
+      ]),
+      el("div", { class: "fav-actions" }, [
+        el("button", { type: "button", class: "mini", onclick: () => {
+          logEntries.push({ name: `${move.nameJp || move.name}`, min: s.min, max: s.max, maxHp: r.maxHp, include: true });
+          renderLog();
+        } }, "＋このダメージをログに追加"),
       ]),
     ]));
   }
@@ -709,7 +806,7 @@ function damageTab(preset) {
       labeled("ポケモン", atkSel),
       el("div", { class: "fav-row2" }, [labeled("お気に入りから", atkFavSel), labeled("ランキングから", atkRankPickSel)]),
       el("div", { class: "field" }, [el("label", {}, "最近使った攻撃"), atkRecents]),
-      labeled("わざ", moveSel),
+      el("div", { class: "field" }, [el("label", {}, "わざ"), moveSearch, moveSel]),
       el("div", { class: "fav-actions" }, [atkSaveBtn]),
     ]),
     el("section", { class: "card" }, [
@@ -720,20 +817,37 @@ function damageTab(preset) {
     ]),
   ]);
 
+  // --- #3 ワンタップ入力 ---
+  const setSP = (input, val) => { input.value = String(val); input.dispatchEvent(new Event("input")); };
+  const quick = (label, title, onClick) => el("button", { type: "button", class: "mini sp-quick", title, onclick: onClick }, label);
+  // 数値SP欄の横に「32」ボタンを添える
+  const labeledSP = (label, input) => el("div", { class: "field" }, [
+    el("label", {}, label),
+    el("div", { class: "sp-quick-wrap" }, [input, quick("32", "最大(32)にする", () => { setSP(input, SP_MAX_PER_STAT); render(); })]),
+  ]);
+  // 攻撃側プリセット（攻撃ステの投資量＝ダメ計に素早さは不使用）
+  const atkPresets = el("div", { class: "sp-quick-row" }, [
+    el("span", { class: "dim sp-quick-label" }, "一発設定:"),
+    quick("最速", "攻撃SP32＋性格↑", () => { setSP(atkSP, SP_MAX_PER_STAT); atkNature.set("up"); render(); }),
+    quick("準速", "攻撃SP32＋無補正", () => { setSP(atkSP, SP_MAX_PER_STAT); atkNature.set("neutral"); render(); }),
+    quick("無振り", "攻撃SP0", () => { setSP(atkSP, 0); atkNature.set("down"); render(); }),
+  ]);
+
   // 詳細設定（折りたたみ）: SP・性格・とくせい・持ち物・ランク・場・補正
   const advGrid = el("div", { class: "dmg-grid" }, [
     el("section", { class: "card" }, [
       el("h4", { class: "card-sub" }, "攻撃側の詳細"),
-      el("div", { class: "fav-row2" }, [labeled("攻撃SP(0-32)", atkSP), labeled("ランク補正", atkRankSel)]),
+      el("div", { class: "fav-row2" }, [labeledSP("攻撃SP(0-32)", atkSP), labeled("ランク補正", atkRankSel)]),
+      atkPresets,
       labeled("性格補正", atkNature),
       labeled("とくせい", atkAbilSel),
       labeled("持ち物", atkItemSel),
     ]),
     el("section", { class: "card" }, [
       el("h4", { class: "card-sub" }, "防御側の詳細"),
-      el("div", { class: "fav-row2" }, [labeled("HP SP(0-32)", defHpSP), labeled("残りHP(%)", remainHp)]),
+      el("div", { class: "fav-row2" }, [labeledSP("HP SP(0-32)", defHpSP), labeled("残りHP(%)", remainHp)]),
       el("p", { class: "hint" }, "防御(B)=物理技を受ける時／特防(D)=特殊技を受ける時に使われます。"),
-      el("div", { class: "fav-row2" }, [labeled("防御SP(0-32)", defBSP), labeled("特防SP(0-32)", defDSP)]),
+      el("div", { class: "fav-row2" }, [labeledSP("防御SP(0-32)", defBSP), labeledSP("特防SP(0-32)", defDSP)]),
       el("div", { class: "fav-row2" }, [labeled("防御の性格補正", defNatB), labeled("特防の性格補正", defNatD)]),
       labeled("ランク補正", defRankSel),
       labeled("とくせい", defAbilSel),
@@ -757,7 +871,8 @@ function damageTab(preset) {
   // 結論を最上部に（モバイルでは画面上部に固定）→ 入力はその下
   root.append(
     result,
-    el("p", { class: "hint" }, "相手と自分のポケモン・わざを選ぶだけで結論が出ます（攻撃SP最大・性格↑が初期値）。ランク補正・天候・壁・とくせい・持ち物は「詳細設定」で。「計算未対応」の特性や接触/連続技依存は反映されません。"),
+    logPanel,
+    el("p", { class: "hint" }, "相手と自分のポケモン・わざを選ぶだけで結論が出ます（攻撃SP最大・性格↑が初期値）。ランク補正・天候・壁・とくせい・持ち物は「詳細設定」で。とくせいは最採用を既定表示。「＋ログに追加」で複数技を合算できます。"),
     coreGrid, moreDetails
   );
 

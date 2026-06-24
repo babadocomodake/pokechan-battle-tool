@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from scrape.regulation import fetch_regulation, cross_check_official
-from scrape.usage import fetch_usage, make_rank_lookup
+from scrape.usage import fetch_usage, make_rank_lookup, fetch_adoption
 
 ROOT = Path(__file__).resolve().parent
 RAW = ROOT / "data" / "raw"
@@ -56,6 +56,14 @@ POKEAPI_CSV_FILES = [
 ]
 JA_LANG_ID = "1"
 
+# Pokémon Showdown 公開JSON（種・形態・種族値・特性・メガ＝Champions新メガ収録 / 技フラグ）。
+# 旧データ元(otterlyclueless)は更新停止のため、種データ(pokedex)と技フラグはこちらを一次源にする。
+SHOWDOWN_BASE = "https://play.pokemonshowdown.com/data"
+SHOWDOWN_FILES = {"pokedex": "pokedex.json", "moves": "moves.json"}
+
+# 地方フォーム接頭辞（Showdownの forme → 日本語アプリの英語表示名 規則）。
+REGIONAL_PREFIX = {"Alola": "Alolan ", "Galar": "Galarian ", "Hisui": "Hisuian ", "Paldea": "Paldean "}
+
 # 「持てる対戦アイテム」とみなす PokeAPI のカテゴリ。ベリーは別途 nameJp末尾「のみ」で判定。
 HELD_ITEM_CATEGORIES = {
     "held-items", "choice", "bad-held-items", "type-enhancement", "type-protection",
@@ -65,8 +73,9 @@ HELD_ITEM_CATEGORIES = {
 MEGA_STONE_RE = re.compile(r"held by an?\s+(.+?),\s+this item allows it to Mega Evolve", re.I)
 
 ATTRIBUTION = (
-    "Pokemon Champions Data — github.com/otterlyclueless/pokemon-champions-data (CC BY 4.0). "
-    "Regulation/legality: Serebii.net + Pokémon Champions 公式."
+    "種・種族値・メガ・技フラグ: Pokémon Showdown (smogon/pokemon-showdown). "
+    "技説明/道具/特性/学習技/日本語名: otterlyclueless/pokemon-champions-data (CC BY 4.0) + PokeAPI. "
+    "合法/レギュレーション: Serebii.net + Pokémon Champions 公式. 採用率: champs.pokedb.tokyo."
 )
 USER_AGENT = "Mozilla/5.0 (compatible; pokechamp-helper/0.1; data sync)"
 
@@ -86,6 +95,79 @@ def fetch_dataset(force: bool = False) -> dict:
             cache.write_text(raw, encoding="utf-8")
         out[key] = json.loads(raw)
     return out
+
+
+def fetch_showdown(force: bool = False) -> dict:
+    """Showdown 公開JSON（pokedex/moves）を取得（キャッシュ利用）。"""
+    RAW.mkdir(parents=True, exist_ok=True)
+    out: dict = {}
+    for key, fn in SHOWDOWN_FILES.items():
+        cache = RAW / f"ps_{fn}"
+        if cache.exists() and not force:
+            raw = cache.read_text(encoding="utf-8")
+        else:
+            req = urllib.request.Request(f"{SHOWDOWN_BASE}/{fn}", headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                raw = resp.read().decode("utf-8")
+            cache.write_text(raw, encoding="utf-8")
+        out[key] = json.loads(raw)
+    return out
+
+
+def toid(s: str) -> str:
+    """Showdown の識別子化（英数字のみ・小文字）。"""
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+# Serebii英語名の地方接頭辞 → Showdownの地方サフィックス。
+_SEREBII_REGION = {"Alolan ": "alola", "Galarian ": "galar", "Hisuian ": "hisui", "Paldean ": "paldea"}
+# Showdownキーが規則どおりにならない例外（Serebii名 → Showdownキー）。
+_SHOWDOWN_ALIAS: dict[str, str] = {}
+
+
+def serebii_to_showdown_id(name_en: str) -> str:
+    """Serebii の英語表示名（'Mega Sceptile'/'Alolan Raichu'/'Charizard'）→ Showdown pokedex キー。
+    Serebiiのslugは基本種で共有されるため、メガ/地方は名前から復元して突合する。"""
+    n = (name_en or "").strip()
+    if n in _SHOWDOWN_ALIAS:
+        return _SHOWDOWN_ALIAS[n]
+    if n.startswith("Mega "):
+        rest = n[len("Mega "):]
+        suffix = ""
+        if rest.endswith(" X"):
+            rest, suffix = rest[:-2], "x"
+        elif rest.endswith(" Y"):
+            rest, suffix = rest[:-2], "y"
+        return toid(rest) + "mega" + suffix
+    for pre, reg in _SEREBII_REGION.items():
+        if n.startswith(pre):
+            return toid(n[len(pre):]) + reg
+    return toid(n)
+
+
+def _showdown_form(entry: dict) -> str:
+    """Showdown種エントリ → 'Mega' / 'Regional' / 'Base'。"""
+    forme = entry.get("forme") or ""
+    if forme.startswith("Mega"):
+        return "Mega"
+    if any(forme.startswith(r) for r in REGIONAL_PREFIX):
+        return "Regional"
+    return "Base"
+
+
+def _showdown_name(entry: dict) -> str:
+    """Showdown種エントリ → アプリ既存の英語表示名規則（'Mega Charizard X'/'Alolan Raichu'等）。
+    既存の localStorage（お気に入り/履歴）との互換のため命名規則を踏襲する。"""
+    forme = entry.get("forme") or ""
+    base = entry.get("baseSpecies") or entry["name"]
+    if forme.startswith("Mega"):
+        suffix = " X" if forme.endswith("-X") else (" Y" if forme.endswith("-Y") else "")
+        return f"Mega {base}{suffix}"
+    for reg, pre in REGIONAL_PREFIX.items():
+        if forme.startswith(reg):
+            rest = forme[len(reg):].strip("-")
+            return f"{pre}{base}" + (f" ({rest})" if rest else "")
+    return entry["name"]
 
 
 def _read_csv(path: Path) -> list[dict]:
@@ -151,56 +233,54 @@ def _display_jp(name_en: str, species_jp: str) -> str:
     return species_jp
 
 
-def build_pokemon(dataset: dict, legal_forms) -> tuple[list[dict], list[str]]:
-    """roster + base-stats を結合し、合法フラグと日本語名を付与。
+def build_pokemon(showdown_pokedex: dict, legal_forms) -> tuple[list[dict], list[str]]:
+    """Showdown pokedex（種・形態・種族値・特性・メガ）を Serebii 合法フォームに突合し、
+    合法ポケモンの一覧（種族値・タイプ・特性・日本語名・メガストーン名）を作る。
 
-    戻り値: (pokemonリスト, エラーメッセージリスト)
-    エラーが空でなければ不整合 → 呼び出し側で書き出しを中断する。
+    突合鍵: toid(Serebii slug) == Showdown のエントリキー（例: 'charizard-mega-x'→'charizardmegax'）。
+    戻り値: (pokemonリスト, エラーメッセージリスト)。エラーが空でなければ中断。
     """
     errors: list[str] = []
-
-    stats_by_name = {e["name"]: e for e in dataset["base_stats"]}
-    legal_by_name = {f.name_en: f for f in legal_forms}
-    dataset_names = {e["name"] for e in dataset["roster"]}
-
-    # 整合チェック(1): Serebiiの合法名がデータセットに存在するか
-    missing = [f.name_en for f in legal_forms if f.name_en not in dataset_names]
-    if missing:
-        errors.append(
-            f"Serebii合法 {len(missing)}件がデータセットに存在しません（名称ゆれ/未収録）: "
-            + ", ".join(missing[:10]) + (" ..." if len(missing) > 10 else "")
-        )
-
     pokemon: list[dict] = []
-    for entry in dataset["roster"]:
-        name = entry["name"]
-        stats = stats_by_name.get(name)
-        if stats is None:
-            errors.append(f"base-stats に '{name}' がありません（roster と不整合）")
+    used_names: dict[str, str] = {}
+
+    for lf in legal_forms:
+        pid = serebii_to_showdown_id(lf.name_en)
+        entry = showdown_pokedex.get(pid) or showdown_pokedex.get(toid(lf.name_en)) \
+            or showdown_pokedex.get(toid(lf.slug))
+        if entry is None:
+            errors.append(f"Showdown pokedex に '{lf.name_en}' (slug={lf.slug}) が見つかりません")
             continue
-        legal = legal_by_name.get(name)
-        if legal is not None:
-            jp = _display_jp(name, legal.name_jp)
-        else:
-            # 非合法フォーム: 同一図鑑番号の合法種から種名を借りる
-            same_dex = next((f for f in legal_forms if f.dex_number == entry["dexNumber"]), None)
-            jp = _display_jp(name, same_dex.name_jp) if same_dex else name
-        pokemon.append({
+        name = _showdown_name(entry)
+        # 表示名の衝突回避（地方フォーム細分など）。内部キーの一意性を担保。
+        if name in used_names and used_names[name] != pid:
+            name = f"{name} [{lf.slug}]"
+        used_names[name] = pid
+
+        bs = entry["baseStats"]
+        rec = {
             "name": name,
-            "nameJp": jp,
-            "dexNumber": entry["dexNumber"],
-            "form": entry.get("form", "Base"),
+            "nameJp": _display_jp(name, lf.name_jp),
+            "dexNumber": lf.dex_number,
+            "form": _showdown_form(entry),
             "types": entry["types"],
             "abilities": list(entry.get("abilities", {}).values()),
-            "base": {k: stats[k] for k in ("hp", "atk", "def", "spa", "spd", "spe")},
-            "bst": stats.get("total"),
-            "legal": legal is not None,
-        })
+            "base": {k: bs[k] for k in ("hp", "atk", "def", "spa", "spd", "spe")},
+            "bst": sum(bs[k] for k in ("hp", "atk", "def", "spa", "spd", "spe")),
+            "legal": True,
+        }
+        if entry.get("requiredItem"):
+            rec["megaStoneName"] = entry["requiredItem"]  # メガストーン英語名（attach_mega_stonesで使用）
+        pokemon.append(rec)
 
     return pokemon, errors
 
 
-def build_moves(dataset: dict, ja_map: dict) -> tuple[list[dict], int]:
+# とくせい計算（てつのこぶし/かたいツメ 等）に使う技フラグ。Showdown moves から付与。
+MOVE_FLAGS = ("contact", "punch", "bite", "pulse", "sound", "bullet")
+
+
+def build_moves(dataset: dict, ja_map: dict, sd_moves: dict) -> tuple[list[dict], int]:
     keep = ("name", "type", "category", "power", "accuracy", "pp", "priority", "target",
             "inChampions", "description")
     out, miss = [], 0
@@ -209,6 +289,12 @@ def build_moves(dataset: dict, ja_map: dict) -> tuple[list[dict], int]:
         d["nameJp"] = localize(m["name"], ja_map)
         if d["nameJp"] == m["name"]:
             miss += 1
+        # Showdown の技フラグ/二次効果/反動を付与（とくせい全網羅の判定材料）
+        sm = sd_moves.get(toid(m["name"])) or {}
+        flags = sm.get("flags") or {}
+        d["flags"] = {f: bool(flags.get(f)) for f in MOVE_FLAGS}
+        d["hasSecondary"] = bool(sm.get("secondary") or sm.get("secondaries"))
+        d["isRecoil"] = bool(sm.get("recoil"))
         out.append(d)
     return out, miss
 
@@ -251,23 +337,25 @@ def parse_mega_stones(items_localized: list[dict]) -> dict:
 
 
 def attach_mega_stones(pokemon: list[dict], items_localized: list[dict]) -> int:
-    """メガ個体に megaStone={name,nameJp} を付与。公式日本語名が無い新規メガは
-    「<種の日本語名>ナイト(+X/Y)」で合成する。戻り値は付与した数。"""
-    stones = parse_mega_stones(items_localized)
+    """メガ個体に megaStone={name,nameJp} を付与。英語名は Showdown の requiredItem
+    （build_pokemon が rec['megaStoneName'] に格納）を優先し、説明文解析を補助に使う。
+    公式日本語名が無い新規メガは「<種の日本語名>ナイト(+X/Y)」で合成する。戻り値は付与した数。"""
+    stones = parse_mega_stones(items_localized)       # 説明文ベースの補助マップ
+    items_by_name = {it["name"]: it for it in items_localized}
     species_jp = {p["dexNumber"]: p["nameJp"] for p in pokemon if p["form"] == "Base"}
     count = 0
     for p in pokemon:
+        required = p.pop("megaStoneName", None)
         if p["form"] != "Mega":
             continue
         sjp = species_jp.get(p["dexNumber"], p["nameJp"])
         suf = "X" if p["name"].endswith(" X") else ("Y" if p["name"].endswith(" Y") else "")
-        st = stones.get(p["name"])
-        if st and st["nameJp"] != st["name"]:
-            jp, en = st["nameJp"], st["name"]
-        elif st:
-            jp, en = f"{sjp}ナイト{suf}", st["name"]  # 英語名のみ → 日本語は合成
+        en = required or (stones.get(p["name"]) or {}).get("name")
+        it = items_by_name.get(en) if en else None
+        if it and it.get("nameJp") and it["nameJp"] != it["name"]:
+            jp = it["nameJp"]                          # items.json の公式日本語名
         else:
-            jp, en = f"{sjp}ナイト{suf}", None         # 石未検出 → 合成
+            jp = f"{sjp}ナイト{suf}"                    # 無ければ合成
         p["megaStone"] = {"name": en, "nameJp": jp}
         count += 1
     return count
@@ -300,8 +388,10 @@ def main() -> int:
     ap.add_argument("--force", action="store_true", help="全ソースを再取得")
     args = ap.parse_args()
 
-    print("A系統（ゲーム基礎データ）を取得中 ...")
+    print("A系統（ゲーム基礎データ: 道具/特性/技説明/学習技/タイプ相性）を取得中 ...")
     dataset = fetch_dataset(force=args.force)
+    print("A系統（Showdown: 種・種族値・特性・メガ・技フラグ）を取得中 ...")
+    showdown = fetch_showdown(force=args.force)
     print("B系統（Serebii 合法判定）を取得中 ...")
     regulation = fetch_regulation(cache_dir=RAW, force=args.force)
     print(f"  Regulation {regulation.regulation} / Season {regulation.season}: "
@@ -325,11 +415,35 @@ def main() -> int:
         warnings.append(f"使用率(pokedb)取得に失敗（人気順は無効）: {exc}")
         print("WARN:", warnings[-1])
 
-    pokemon, errors = build_pokemon(dataset, regulation.legal_forms)
+    pokemon, errors = build_pokemon(showdown["pokedex"], regulation.legal_forms)
     legal_count = sum(1 for p in pokemon if p["legal"])
     # ポケモンの特性も日本語名を併記（UI表示用）
     for p in pokemon:
         p["abilitiesJp"] = [localize(a, ja["abilities"]) for a in p["abilities"]]
+
+    # C系統2: 種ごとの採用率（#5 とくせい既定 / わざ並び順 用。取得失敗は非致命）
+    print("採用率（pokedb 個別ページ・とくせい/わざ）を取得中 ...")
+    legal_dexes = sorted({p["dexNumber"] for p in pokemon})
+    adoption_by_dex: dict[int, dict] = {}
+    for i, dex in enumerate(legal_dexes):
+        try:
+            adoption_by_dex[dex] = fetch_adoption(dex, 0, 0, cache_dir=RAW, force=args.force)
+        except Exception:  # noqa: BLE001 - 1件の失敗で全体を止めない
+            adoption_by_dex[dex] = {"abilities": [], "moves": []}
+        if (i + 1) % 50 == 0:
+            print(f"  ... {i + 1}/{len(legal_dexes)} 種")
+    # topAbility（メガは固有の単一特性 / 一般は採用率トップを英語名で）
+    for p in pokemon:
+        abils, abils_jp = p["abilities"], p.get("abilitiesJp") or []
+        top = None
+        if p["form"] == "Mega":
+            top = abils[0] if abils else None
+        else:
+            for jp_name, _rate in adoption_by_dex.get(p["dexNumber"], {}).get("abilities", []):
+                if jp_name in abils_jp:
+                    top = abils[abils_jp.index(jp_name)]
+                    break
+        p["topAbility"] = top or (abils[0] if abils else None)
 
     # 使用率順位を付与（nameJp で照合、フォーム分割は前方一致）
     look_s = make_rank_lookup(usage_single) if usage_single else (lambda _n: None)
@@ -365,25 +479,40 @@ def main() -> int:
         "legalPokemonCount": legal_count,
         "generatedAt": generated_at,
         "sources": {
-            "gameData": "github.com/otterlyclueless/pokemon-champions-data (CC BY 4.0)",
+            "species": "play.pokemonshowdown.com (smogon/pokemon-showdown)",
+            "gameData": "github.com/otterlyclueless/pokemon-champions-data (CC BY 4.0) + PokeAPI",
             "regulation": regulation.source_url,
+            "usage": "champs.pokedb.tokyo",
             "official": "https://www.pokemonchampions.jp/ja/battle/",
         },
         "attribution": ATTRIBUTION,
         "warnings": warnings,
     }
 
-    moves, moves_miss = build_moves(dataset, ja["moves"])
+    moves, moves_miss = build_moves(dataset, ja["moves"], showdown["moves"])
     items, items_miss = build_items(dataset["items"], ja["items"], item_category_map())
     abilities, ab_miss = localize_list(dataset["abilities"], ja["abilities"])
     mega_count = attach_mega_stones(pokemon, items)
     holdable_count = sum(1 for it in items if it["holdable"])
 
+    # 合法アイテム名が items.json に存在するか検証（typo/名称ゆれ検知・非致命）
+    item_names = {it["name"] for it in items}
+    unknown_items = [n for n in regulation.rules.get("legal_items", []) if n not in item_names]
+    if unknown_items:
+        warnings.append("合法アイテムで items.json に無い名称: " + ", ".join(unknown_items))
+        print("WARN:", warnings[-1])
+
+    # わざ採用率（図鑑番号 → {日本語技名: rate}）。#2 わざ並び順で使用。
+    move_adoption_by_dex = {
+        str(dex): {jp: rate for jp, rate in ad.get("moves", [])}
+        for dex, ad in adoption_by_dex.items() if ad.get("moves")
+    }
     usage_json = {
         "season": regulation.season,
         "source": "champs.pokedb.tokyo",
         "single": [{"rank": r, "name": n} for r, n in usage_single],
         "double": [{"rank": r, "name": n} for r, n in usage_double],
+        "moveAdoptionByDex": move_adoption_by_dex,
     }
 
     outputs = {

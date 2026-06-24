@@ -112,7 +112,66 @@ const ABILITY_FX = {
   "Ice Scales": { def: (c) => (!c.physical ? { dmg: 0.5 } : {}) },
   "Purifying Salt": { def: (c) => (c.moveType === "Ghost" ? { dmg: 0.5 } : {}) },
   "Levitate": { def: (c) => (c.moveType === "Ground" ? { immune: true } : {}) },
+
+  // === 追加（M-B全網羅）: わざフラグ依存の攻撃特性 ===========================
+  "Iron Fist": { atk: (c) => (c.punch ? { dmg: 1.2 } : {}) },          // てつのこぶし: パンチ技 ×1.2
+  "Tough Claws": { atk: (c) => (c.contact ? { dmg: 1.3 } : {}) },      // かたいツメ: 接触技 ×1.3
+  "Strong Jaw": { atk: (c) => (c.bite ? { dmg: 1.5 } : {}) },          // がんじょうあご: かみつき技 ×1.5
+  "Mega Launcher": { atk: (c) => (c.pulse ? { dmg: 1.5 } : {}) },      // メガランチャー: 波動技 ×1.5
+  "Reckless": { atk: (c) => (c.recoil ? { dmg: 1.2 } : {}) },          // すてみ: 反動技 ×1.2
+  "Sheer Force": { atk: (c) => (c.hasSecondary ? { dmg: 1.3 } : {}) }, // ちからずく: 追加効果技 ×1.3
+  "Sniper": { atk: (c) => (c.crit ? { dmg: 1.5 } : {}) },              // スナイパー: 急所時さらに ×1.5
+  "Neuroforce": { atk: (c) => (c.typeEff > 1 ? { dmg: 1.25 } : {}) },  // ブレインフォース: 抜群 ×1.25
+  // パンクロック: 攻撃=音技1.3 / 防御=音技0.5
+  "Punk Rock": {
+    atk: (c) => (c.sound ? { dmg: 1.3 } : {}),
+    def: (c) => (c.sound ? { dmg: 0.5 } : {}),
+  },
+  // 状態異常で発動扱い（攻撃側で適用＝発動状態として計算）
+  "Gorilla Tactics": { atk: (c) => (c.physical ? { atkStat: 1.5 } : {}) }, // ゴリラ: 物理攻撃1.5
+  "Hustle": { atk: (c) => (c.physical ? { atkStat: 1.5 } : {}) },          // はりきり: 物理攻撃1.5
+  "Guts": { atk: (c) => (c.physical ? { atkStat: 1.5 } : {}) },            // こんじょう: 状態異常時 物理1.5
+
+  // === 追加（M-B全網羅）: 防御特性 =========================================
+  "Fur Coat": { def: (c) => (c.physical ? { dmg: 0.5 } : {}) },        // けがわ: 物理被ダメ ×0.5
+  "Marvel Scale": { def: (c) => (c.physical ? { dmg: 1 / 1.5 } : {}) }, // マーベルスケイル: 状態時 物理被ダメ軽減
+  // もふもふ: 接触 ×0.5 / 炎技 ×2
+  "Fluffy": {
+    def: (c) => {
+      let m = 1;
+      if (c.contact) m *= 0.5;
+      if (c.moveType === "Fire") m *= 2;
+      return m !== 1 ? { dmg: m } : {};
+    },
+  },
+  // かわきはだ: 炎で被ダメ増 / 水は無効
+  "Dry Skin": {
+    def: (c) => (c.moveType === "Fire" ? { dmg: 1.25 } : (c.moveType === "Water" ? { immune: true } : {})),
+  },
+
+  // === 追加（M-B全網羅）: タイプ無効・吸収（被ダメ0） =====================
+  "Water Absorb": { def: (c) => (c.moveType === "Water" ? { immune: true } : {}) },     // ちょすい
+  "Storm Drain": { def: (c) => (c.moveType === "Water" ? { immune: true } : {}) },      // よびみず
+  "Volt Absorb": { def: (c) => (c.moveType === "Electric" ? { immune: true } : {}) },   // ちくでん
+  "Lightning Rod": { def: (c) => (c.moveType === "Electric" ? { immune: true } : {}) }, // ひらいしん
+  "Motor Drive": { def: (c) => (c.moveType === "Electric" ? { immune: true } : {}) },   // でんきエンジン
+  "Sap Sipper": { def: (c) => (c.moveType === "Grass" ? { immune: true } : {}) },       // そうしょく
+  "Earth Eater": { def: (c) => (c.moveType === "Ground" ? { immune: true } : {}) },     //土を食らう
+  "Well-Baked Body": { def: (c) => (c.moveType === "Fire" ? { immune: true } : {}) },   // よくやけるからだ
 };
+
+// タイプ変化特性（-ate系）: 指定タイプ化＋×1.2。computeOne がわざタイプを変えるのに使う。
+// Normalize は全技をノーマル化、他は「ノーマル技」を各タイプへ変換。
+export const ATE_ABILITIES = {
+  "Aerilate": "Flying", "Pixilate": "Fairy", "Refrigerate": "Ice",
+  "Galvanize": "Electric", "Normalize": "Normal",
+};
+export function ateConversion(abilityName, moveType) {
+  if (abilityName === "Normalize") return { type: "Normal", boost: 1.2 };
+  const t = ATE_ABILITIES[abilityName];
+  if (t && moveType === "Normal") return { type: t, boost: 1.2 };
+  return null;
+}
 // 指定の特性が「side（"atk" or "def"）」で効く倍率を返す。
 // side を省略すると両側を合算（後方互換・テスト用）。
 export function abilityMods(abilityName, side, ctx) {
@@ -128,7 +187,7 @@ export function abilityMods(abilityName, side, ctx) {
   return fn(ctx) || {};
 }
 export function isAbilitySupported(abilityName) {
-  return !!ABILITY_FX[abilityName];
+  return !!ABILITY_FX[abilityName] || !!ATE_ABILITIES[abilityName];
 }
 
 // ---- 持ち物（説明文ベースで自動判定 + 例外）----
