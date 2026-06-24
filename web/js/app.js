@@ -1,7 +1,7 @@
 // アプリ本体: タブ（ダメージ計算 / 素早さ一覧 / 逆算 / 流行り / マイポケモン）
 import { loadData, store, getNature, attackingMovesFor, allMovesFor, byUsage } from "./data.js";
 import { calcStat, calcAllStats, STAT_KEYS, STAT_LABELS_JP, SP_MAX_PER_STAT, SP_TOTAL } from "./calc/stats.js";
-import { buildSpeedTable } from "./calc/speed.js";
+import { buildSpeedTable, speedPresets, applySpeedMods } from "./calc/speed.js";
 import { statStageMultiplier } from "./calc/stages.js";
 import { computeDamage, typeEffectiveness, stabMultiplier, summarize } from "./calc/damage.js";
 import {
@@ -881,11 +881,17 @@ function damageTab(preset) {
     advGrid, fieldRow, modRow,
   ]);
 
+  // アクション行（攻守入替＝Bで追加 / 素早さ比較）。Aで下部Dockへ移設予定。
+  const speedCompareBtn = el("button", { type: "button", class: "mini act-btn", "data-testid": "speed-compare-btn",
+    onclick: () => speedCompareModal(attacker, defender) }, "⚡ 素早さ比較");
+  const actionRow = el("div", { class: "dmg-actions" }, [speedCompareBtn]);
+
   // 結論を最上部に（モバイルでは画面上部に固定）→ 入力はその下
   root.append(
     result,
     resultMore,
     logPanel,
+    actionRow,
     el("p", { class: "hint" }, "ポケモンとわざを選ぶだけで結論が出ます。細かい調整は「詳細設定」。"),
     coreGrid, moreDetails
   );
@@ -922,6 +928,85 @@ function damageTab(preset) {
 
 function labeled(label, control) {
   return el("div", { class: "field" }, [el("label", {}, label), control]);
+}
+
+// 攻防2体の素早さ比較モーダル（GameWith「かんたん素早さ比較」相当）。
+// speedPresets/applySpeedMods を流用。side毎に ランク補正＋特性×2 を持つ。各段で速い側を強調。
+function speedCompareModal(atk, def) {
+  const SPEED_ROWS = [
+    { key: "maxScarf", label: "最速+スカ", base: "max", scarf: true },
+    { key: "fastScarf", label: "準速+スカ", base: "fast", scarf: true },
+    { key: "max", label: "最速", base: "max", scarf: false },
+    { key: "fast", label: "準速", base: "fast", scarf: false },
+    { key: "none", label: "無振", base: "none", scarf: false },
+  ];
+  const mods = { atk: { stage: 0, x2: false }, def: { stage: 0, x2: false } };
+  const valuesFor = (p, m) => {
+    const isMega = p.form === "Mega";
+    const ps = speedPresets(p.base.spe);
+    const out = {};
+    for (const r of SPEED_ROWS) {
+      let v = applySpeedMods(ps[r.base], { stage: m.stage, scarf: r.scarf }, isMega);
+      if (m.x2) v = Math.floor(v * 2);
+      out[r.key] = v;
+    }
+    return out;
+  };
+
+  const overlay = el("div", { class: "modal-overlay", "data-testid": "speed-modal" });
+  const panel = el("div", { class: "modal-panel" });
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+  function colControls(sideKey) {
+    const m = mods[sideKey];
+    const stageLbl = el("span", { class: "spc-stage-val" }, `+${m.stage}`);
+    const dec = el("button", { type: "button", class: "mini sp-quick", onclick: () => { m.stage = Math.max(0, m.stage - 1); render(); } }, "▼");
+    const inc = el("button", { type: "button", class: "mini sp-quick", onclick: () => { m.stage = Math.min(6, m.stage + 1); render(); } }, "▲");
+    const cb = el("input", { type: "checkbox", onchange: (e) => { m.x2 = e.target.checked; render(); } });
+    return el("div", { class: "spc-ctrl" }, [
+      el("div", { class: "spc-rank" }, [el("span", { class: "dim" }, "ランク"), dec, stageLbl, inc]),
+      el("label", { class: "toggle" }, [cb, " 特性×2"]),
+    ]);
+  }
+
+  const grid = el("div", { class: "spc-grid" });
+  function render() {
+    const av = valuesFor(atk, mods.atk);
+    const dv = valuesFor(def, mods.def);
+    const head = (p, side) => el("div", { class: "spc-col-head" }, [
+      el("div", { class: "spc-name" }, p.nameJp),
+      el("div", { class: "spc-base" }, [el("span", { class: "dim" }, "種族値S "), el("b", {}, String(p.base.spe))]),
+      colControls(side),
+    ]);
+    const rowEls = SPEED_ROWS.map((r) => {
+      const a = av[r.key], d = dv[r.key];
+      const aCls = "spc-v" + (a > d ? " fast" : a < d ? " slow" : "");
+      const dCls = "spc-v" + (d > a ? " fast" : d < a ? " slow" : "");
+      return el("div", { class: "spc-row" }, [
+        el("span", { class: aCls }, String(a)),
+        el("span", { class: "spc-tier" }, r.label),
+        el("span", { class: dCls }, String(d)),
+      ]);
+    });
+    grid.replaceChildren(
+      el("div", { class: "spc-cols" }, [head(atk, "atk"), el("div", { class: "spc-tier-head" }, "段階"), head(def, "def")]),
+      ...rowEls,
+      el("p", { class: "hint" }, "緑＝その段階で相手より速い。Lv50・個体値31。最速=性格↑/準速=無補正/無振=振り0。スカは×1.5（メガ不可）、特性×2はようりょくそ等。"),
+    );
+  }
+
+  panel.append(
+    el("div", { class: "modal-head" }, [
+      el("h3", {}, "素早さ比較"),
+      el("button", { type: "button", class: "modal-close", "aria-label": "閉じる", onclick: close }, "✕"),
+    ]),
+    grid,
+  );
+  overlay.append(panel);
+  render();
+  document.body.appendChild(overlay);
+  return overlay;
 }
 
 // =================== タブ: 逆算（耐久調整 R1） ===================
