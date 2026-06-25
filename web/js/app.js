@@ -651,8 +651,28 @@ function damageTab(preset) {
   function closeSheet() { setSheet(false); }
   // Dock高を実測して --dock-h に反映（main の下余白計算に使う）
   function measureDock() {
-    requestAnimationFrame(() => document.documentElement.style.setProperty("--dock-h", `${resultDock.offsetHeight || 0}px`));
+    requestAnimationFrame(() => {
+      document.documentElement.style.setProperty("--dock-h", `${resultDock.offsetHeight || 0}px`);
+      updateDockVisibility();
+    });
   }
+  // 最下部（フッター＝参考サイト/注意書き）までスクロールしたら、固定Dockを隠してリンクと干渉させない。
+  const footerEl = document.querySelector(".site-footer");
+  function updateDockVisibility() {
+    if (!resultDock.isConnected) return;
+    if (!window.matchMedia("(max-width: 480px)").matches) { resultDock.classList.remove("dock-hidden"); return; }
+    const navH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--nav-h")) || 56;
+    const hide = !!footerEl && footerEl.getBoundingClientRect().top < (window.innerHeight - navH);
+    resultDock.classList.toggle("dock-hidden", hide);
+  }
+  // リスナーはタブ再生成で重複しないよう、前回ぶんを差し替える。
+  if (window.__dockVisHandler) {
+    window.removeEventListener("scroll", window.__dockVisHandler);
+    window.removeEventListener("resize", window.__dockVisHandler);
+  }
+  window.__dockVisHandler = updateDockVisibility;
+  window.addEventListener("scroll", updateDockVisibility, { passive: true });
+  window.addEventListener("resize", updateDockVisibility);
 
   // --- #13 ダメージログ（防御固定で複数技を累積・セッション内のみ）---
   const logPanel = el("div", { class: "dmg-log" });
