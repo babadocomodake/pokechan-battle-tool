@@ -609,3 +609,14 @@ button.mini.act-btn { padding: 9px 14px; font-weight: 700; }
   .dl-verdict { min-width: 4.4em; font-size: .74rem; }
   .dl-pct { font-size: .78rem; }
 }
+
+/* === トースト（攻守入替などの操作フィードバック） === */
+.app-toast {
+  position: fixed; left: 50%; transform: translateX(-50%) translateY(8px);
+  bottom: calc(var(--nav-h) + var(--dock-h) + env(safe-area-inset-bottom) + 14px);
+  z-index: var(--z-modal); background: var(--accent-2); color: #fff;
+  padding: 9px 14px; border-radius: var(--radius); font-size: .8rem; font-weight: 700;
+  box-shadow: var(--frame); opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s;
+  max-width: 90vw; text-align: center;
+}
+.app-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }

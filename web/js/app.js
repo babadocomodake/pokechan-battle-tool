@@ -54,6 +54,15 @@ function typeBadges(types) {
   return el("span", { class: "types" }, types.map((t) =>
     el("span", { class: `type type-${t.toLowerCase()}` }, TYPE_JP[t] || t)));
 }
+// 画面下に短時間表示する通知（操作のフィードバック）。
+let _toastTimer = null;
+function showToast(msg) {
+  let t = document.getElementById("app-toast");
+  if (!t) { t = el("div", { id: "app-toast", class: "app-toast" }); document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove("show"), 1500);
+}
 // タイプ絞り込みチップ（複数選択OR）。対戦に無い「ステラ」は除外。
 // 返り値 { node, matches(types) }。onChange は選択が変わるたびに呼ばれる。
 function typeFilterChips(onChange) {
@@ -622,7 +631,9 @@ function damageTab(preset) {
     onclick: () => speedCompareModal(attacker, defender) }, "⚡ 素早さ比較");
   const sheetToggle = el("button", { type: "button", class: "mini act-btn", "data-testid": "detail-toggle",
     onclick: () => toggleSheet() }, "詳細 ▾");
-  const actionRow = el("div", { class: "dmg-actions" }, [speedCompareBtn, sheetToggle]);
+  const swapBtn = el("button", { type: "button", class: "mini act-btn", "data-testid": "swap-btn",
+    onclick: () => swapSides() }, "⇄ 攻守入替");
+  const actionRow = el("div", { class: "dmg-actions" }, [swapBtn, speedCompareBtn, sheetToggle]);
   const resultDock = el("div", { class: "dmg-result-dock", "data-testid": "result-dock" }, [actionRow, dockLines]);
 
   const resultMore = el("div", { class: "dmg-result-more" }); // 内訳・乱数・ログ追加（シート内）
@@ -820,6 +831,36 @@ function damageTab(preset) {
     const ko = rolls.filter((v) => v >= curHp).length;
     if (ko === 0 || ko === rolls.length) return null;
     return el("div", { class: "dmg-detail" }, `この技1発で倒せる確率: ${(ko / rolls.length * 100).toFixed(1)}%（${ko}/${rolls.length}）`);
+  }
+
+  // 攻守入替: 本体/SP/性格/ランク/とくせいを交換。持ち物は役割が違うのでリセット、HP振り・残りHPは初期化、技は選び直し。
+  function multToState(m) { return m > 1 ? "up" : m < 1 ? "down" : "neutral"; }
+  function swapSides() {
+    const a = attacker, d = defender;
+    const aSP = clampSPVal(atkSP.value), aNat = atkNature.get(), aRank = atkRankSel.value, aAbil = atkAbilSel.value;
+    const dSP = clampSPVal(defSP.value), dNat = defNat.get(), dRank = defRankSel.value, dAbil = defAbilSel.value;
+    // 本体入替（pokemonSelectのsetterはonChange非発火なので各fillは手動）
+    attacker = d; defender = a;
+    atkSel.value = attacker.name; defSel.value = defender.name;
+    // SP/性格/ランクを交換
+    setSP(atkSP, dSP); setSP(defSP, aSP);
+    atkNature.set(multToState(dNat)); defNat.set(multToState(aNat));
+    atkRankSel.value = dRank; defRankSel.value = aRank;
+    // とくせい：新本体で埋め直し、可能なら相手側の選択を引き継ぐ
+    fillAbilitySelect(atkAbilSel, attacker); if ((attacker.abilities || []).includes(dAbil)) atkAbilSel.value = dAbil;
+    fillAbilitySelect(defAbilSel, defender); if ((defender.abilities || []).includes(aAbil)) defAbilSel.value = aAbil;
+    // 持ち物リセット（atk役割↔def役割でoptgroupが別物）＋メガ固定の再適用
+    applyMega(atkItemSel, attacker); if (!atkItemSel.disabled) atkItemSel.value = "";
+    applyMega(defItemSel, defender); if (!defItemSel.disabled) defItemSel.value = "";
+    // HP振り・残りHPは防御固有 → 初期化
+    setSP(defHpSP, 0); remainHp.value = "100";
+    // わざは新攻撃で選び直し（旧技の残留を防ぐ）
+    moveSel.value = ""; refreshMoves();
+    // 履歴・ログ・再描画
+    pushRecent(RECENT_ATK_KEY, attacker.name, RECENT_CAP); renderAtkRecents();
+    upsertRecentSnap(RECENT_DEF_KEY, defSnapshot(), RECENT_CAP); renderRecents();
+    resetLog(); render();
+    showToast("攻守を入替えました（持ち物はリセット）");
   }
 
   function renderAll(cond) {
