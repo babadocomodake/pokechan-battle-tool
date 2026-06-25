@@ -33,7 +33,7 @@
   --z-sheet: 60;
   --z-modal: 70;
   /* 下部の固定要素の高さ（JSで --dock-h を実測反映） */
-  --nav-h: 60px;
+  --nav-h: 56px;
   --dock-h: 0px;
 
   /* === 実機（GBA本体）の配色：共有画像のインディゴ/紫 === */
@@ -563,3 +563,49 @@ button.mini.act-btn { padding: 9px 14px; font-weight: 700; }
 .spc-v { text-align: center; font-size: 1.05rem; font-variant-numeric: tabular-nums; font-weight: 700; }
 .spc-v.fast { color: var(--good); }
 .spc-v.slow { color: var(--dim); font-weight: 400; }
+
+/* === 結果の下部Dock（通常/急所の2行＋HPバー） === */
+.dmg-result-dock { background: var(--surface); border-radius: var(--radius); box-shadow: var(--frame); padding: 8px 10px; margin-top: 10px; }
+.dock-lines { display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
+.dock-empty { color: var(--dim); font-size: .82rem; text-align: center; padding: 6px; }
+.dock-line { display: grid; grid-template-columns: 2.4em 1fr auto auto; gap: 8px; align-items: center; }
+.dl-tag { font-size: .74rem; color: var(--dim); }
+.dl-pct { font-size: .82rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dl-verdict { font-size: .78rem; font-weight: 700; white-space: nowrap; min-width: 5em; text-align: right; }
+.dock-line.ok .dl-verdict { color: var(--good); }
+.dock-line.maybe .dl-verdict { color: var(--hl); }
+.dock-line.warn .dl-verdict { color: var(--accent); }
+.dock-line.no .dl-verdict { color: var(--bad); }
+/* HPバー：トラック＋min(濃)/max(淡)の二層＋10%目盛 */
+.dmg-bar { position: relative; height: 14px; background: var(--surface-2); border-radius: 2px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--line); }
+.dmg-bar .bar-range, .dmg-bar .bar-min { position: absolute; top: 0; bottom: 0; left: 0; }
+.dmg-bar .bar-range { opacity: .42; }
+.dmg-bar::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), rgba(0,0,0,.4) calc(10% - 1px) 10%); }
+.bar-min.ok, .bar-range.ok { background: var(--good); }
+.bar-min.maybe, .bar-range.maybe { background: var(--hl); }
+.bar-min.warn, .bar-range.warn { background: var(--accent); }
+.bar-min.no, .bar-range.no { background: var(--bad); }
+
+/* === 詳細ボトムシート === */
+.sheet-overlay { position: fixed; inset: 0; z-index: var(--z-sheet); background: rgba(6,8,14,.5); }
+.sheet-overlay[hidden] { display: none; }
+.dmg-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: calc(var(--z-sheet) + 1);
+  background: var(--surface-2); box-shadow: 0 -3px 0 0 var(--line); border-radius: var(--radius) var(--radius) 0 0;
+  max-height: 72vh; overflow-y: auto; padding: 12px 14px calc(14px + env(safe-area-inset-bottom)); }
+.dmg-sheet[hidden] { display: none; }
+.sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.dmg-bulk { margin-top: 10px; }
+
+/* スマホ：Dockをタブナビ直上に固定。シート/モーダルは全幅 */
+@media (max-width: 480px) {
+  .dmg-result-dock {
+    position: fixed; left: 0; right: 0; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom));
+    z-index: var(--z-dock); margin: 0; border-radius: 0; padding: 6px 8px;
+    box-shadow: 0 -3px 0 0 var(--line);
+  }
+  /* 入力が固定Dock＋タブナビに隠れないよう下余白を確保（Dock高は実測） */
+  main { padding-bottom: calc(var(--nav-h) + var(--dock-h) + env(safe-area-inset-bottom) + 10px); }
+  .dl-verdict { min-width: 4.4em; font-size: .74rem; }
+  .dl-pct { font-size: .78rem; }
+}

@@ -606,8 +606,7 @@ function damageTab(preset) {
   const terrainSel = fieldSelect(TERRAINS, render);
   const screenSel = fieldSelect(SCREENS, render);
 
-  // 補正トグル
-  const cbCrit = el("input", { type: "checkbox", onchange: render });
+  // 補正トグル（急所は通常/急所の2行常時表示にしたため廃止）
   const cbBurn = el("input", { type: "checkbox", onchange: render });
   const cbAll = el("input", { type: "checkbox", onchange: render });
   // 全技ダメ計のとき、技を「そのタイプ」で絞り込むチップ（複数選択OR）
@@ -617,8 +616,32 @@ function damageTab(preset) {
   atkNature.addEventListener("trichange", render);
   defNat.addEventListener("trichange", render);
 
-  const result = el("div", { class: "dmg-result" });       // 結論＋数値（モバイルでは上部に小さく固定）
-  const resultMore = el("div", { class: "dmg-result-more" }); // 内訳・乱数・ログ追加（非固定でスクロール）
+  // === 結果の下部Dock（通常/急所の2行＋HPバー）＋ 詳細ボトムシート ===
+  const dockLines = el("div", { class: "dock-lines", "data-testid": "dock-lines", onclick: () => openSheet() });
+  const speedCompareBtn = el("button", { type: "button", class: "mini act-btn", "data-testid": "speed-compare-btn",
+    onclick: () => speedCompareModal(attacker, defender) }, "⚡ 素早さ比較");
+  const sheetToggle = el("button", { type: "button", class: "mini act-btn", "data-testid": "detail-toggle",
+    onclick: () => toggleSheet() }, "詳細 ▾");
+  const actionRow = el("div", { class: "dmg-actions" }, [speedCompareBtn, sheetToggle]);
+  const resultDock = el("div", { class: "dmg-result-dock", "data-testid": "result-dock" }, [actionRow, dockLines]);
+
+  const resultMore = el("div", { class: "dmg-result-more" }); // 内訳・乱数・ログ追加（シート内）
+  const bulkWrap = el("div", { class: "dmg-bulk" });           // 全技一括の表（通常スクロール）
+
+  // 詳細ボトムシート（既定は閉じ。displayで開閉＝DOMは残す）
+  let sheetOpen = false;
+  function setSheet(open) {
+    sheetOpen = open;
+    sheet.hidden = !open; sheetOverlay.hidden = !open;
+    sheetToggle.textContent = open ? "詳細 ▴" : "詳細 ▾";
+  }
+  function toggleSheet() { setSheet(!sheetOpen); }
+  function openSheet() { setSheet(true); }
+  function closeSheet() { setSheet(false); }
+  // Dock高を実測して --dock-h に反映（main の下余白計算に使う）
+  function measureDock() {
+    requestAnimationFrame(() => document.documentElement.style.setProperty("--dock-h", `${resultDock.offsetHeight || 0}px`));
+  }
 
   // --- #13 ダメージログ（防御固定で複数技を累積・セッション内のみ）---
   const logPanel = el("div", { class: "dmg-log" });
@@ -702,7 +725,7 @@ function damageTab(preset) {
       atkAbility: atkAbilSel.value, defAbility: defAbilSel.value,
       atkItem: itemObj(atkItemSel.value), defItem: itemObj(defItemSel.value),
       weather: weatherSel.value, terrain: terrainSel.value, screen: screenSel.value,
-      crit: cbCrit.checked, burn: cbBurn.checked,
+      burn: cbBurn.checked,
       remainPct: Math.min(100, Math.max(0, parseInt(remainHp.value || "100", 10) || 0)),
     };
   }
@@ -717,48 +740,68 @@ function damageTab(preset) {
     if (syncRecentSnapFront(RECENT_DEF_KEY, defSnapshot())) renderRecents();
     const cond = gatherCond();
     if (cbAll.checked) return renderAll(cond);
+    bulkWrap.replaceChildren();
     const move = store.movesByName.get(moveSel.value);
-    if (!move) { result.replaceChildren(el("p", {}, "技データがありません")); resultMore.replaceChildren(); return; }
-    const r = computeOne(attacker, defender, move, cond);
-    const s = r.summary;
-    const curHp = Math.max(1, Math.floor(r.maxHp * cond.remainPct / 100));
-    // 固定部：結論＋数値だけ（モバイルで画面を覆わないよう最小限）
-    result.replaceChildren(el("div", {}, [
-      verdictBadge(r, curHp),
-      el("div", { class: "dmg-headline" }, [
-        el("span", { class: "dmg-num" }, `${s.min}〜${s.max}`),
-        el("span", { class: "dmg-pct" }, `相手のHPを ${s.pctMin.toFixed(1)}〜${s.pctMax.toFixed(1)}% 削る`),
-      ]),
-    ]));
-    // 非固定部：内訳・乱数・ログ追加（スクロールして読む）
+    if (!move) {
+      dockLines.replaceChildren(el("div", { class: "dock-empty" }, "ポケモンとわざを選んでください"));
+      resultMore.replaceChildren(); measureDock(); return;
+    }
+    // 通常(crit=false)と急所(crit=true)を別々に計算 → 2行表示
+    const rN = computeOne(attacker, defender, move, { ...cond, crit: false });
+    const rC = computeOne(attacker, defender, move, { ...cond, crit: true });
+    const curHp = Math.max(1, Math.floor(rN.maxHp * cond.remainPct / 100));
+    dockLines.replaceChildren(dockLine("通常", rN, curHp), dockLine("急所", rC, curHp));
+    // 詳細（シート）: 通常ベースの内訳・乱数（通常/急所）・ログ追加
+    const s = rN.summary;
     resultMore.replaceChildren(
       el("div", { class: "dmg-detail" }, [
         `${attacker.nameJp} の ${move.nameJp || move.name} → ${defender.nameJp}`, el("br"),
-        `相手HP実数値 ${r.maxHp}${cond.remainPct < 100 ? `（残り${cond.remainPct}% = ${curHp}）` : ""} ・ ${effLabelOf(r.eff, r.immune)}${r.stab > 1 ? ` ・ タイプ一致×${r.stab}` : ""} ・ ${s.label}`,
+        `相手HP実数値 ${rN.maxHp}${cond.remainPct < 100 ? `（残り${cond.remainPct}% = ${curHp}）` : ""} ・ ${effLabelOf(rN.eff, rN.immune)}${rN.stab > 1 ? ` ・ タイプ一致×${rN.stab}` : ""} ・ 通常${s.label}`,
+      ]),
+      el("details", { class: "rolls", open: "open" }, [
+        el("summary", {}, "通常の乱数（ダメージ / 割合 / 確率）"),
+        el("div", { class: "roll-grid" }, rollCells(rN.rolls, rN.maxHp, curHp)),
+        koLine(rN.rolls, curHp),
       ]),
       el("details", { class: "rolls" }, [
-        el("summary", {}, "乱数をくわしく（ダメージ / 削れる割合 / 出る確率）"),
-        el("div", { class: "roll-grid" }, rollCells(r.rolls, r.maxHp, curHp)),
-        koLine(r.rolls, curHp),
+        el("summary", {}, "急所の乱数"),
+        el("div", { class: "roll-grid" }, rollCells(rC.rolls, rC.maxHp, curHp)),
+        koLine(rC.rolls, curHp),
       ]),
       el("div", { class: "fav-actions" }, [
         el("button", { type: "button", class: "mini", onclick: () => {
-          logEntries.push({ name: `${move.nameJp || move.name}`, min: s.min, max: s.max, maxHp: r.maxHp, include: true });
-          renderLog();
-        } }, "＋このダメージをログに追加"),
+          logEntries.push({ name: `${move.nameJp || move.name}`, min: s.min, max: s.max, maxHp: rN.maxHp, include: true });
+          renderLog(); openSheet();
+        } }, "＋通常ダメージをログに追加"),
       ]),
     );
+    measureDock();
   }
-  // 結論を信号色で一目で。緑=確定で倒せる / 黄=乱数で倒せる / 赤=倒せない。
-  function verdictBadge(r, curHp) {
+  // 短い結論（Dockの各行用）。cls: ok=緑/maybe=黄/warn=金/no=赤。
+  function verdictShort(r, curHp) {
     const s = r.summary;
-    if (r.immune) return el("div", { class: "verdict no" }, "効果なし（特性で無効）");
-    if (r.eff === 0 || s.max === 0) return el("div", { class: "verdict no" }, "効果なし（ダメージなし）");
+    if (r.immune || r.eff === 0 || s.max === 0) return { cls: "no", txt: "効果なし" };
     const ko = r.rolls.filter((v) => v >= curHp).length;
-    if (s.guaranteed === 1) return el("div", { class: "verdict ok" }, "✓ 確定1発で倒せる");
-    if (ko > 0) return el("div", { class: "verdict maybe" }, `△ 乱数1発で倒せる（${(ko / r.rolls.length * 100).toFixed(0)}%）`);
-    if (s.guaranteed) return el("div", { class: "verdict no" }, `1発では落ちない（確定${s.guaranteed}発・最大${s.pctMax.toFixed(0)}%）`);
-    return el("div", { class: "verdict no" }, `${r.rolls.length}発でも倒せない（最大${s.pctMax.toFixed(0)}%）`);
+    if (s.guaranteed === 1) return { cls: "ok", txt: "確定1発" };
+    if (ko > 0) return { cls: "maybe", txt: `乱数1発 ${(ko / r.rolls.length * 100).toFixed(0)}%` };
+    if (s.guaranteed) return { cls: "warn", txt: `確定${s.guaranteed}発` };
+    return { cls: "warn", txt: `最大${s.pctMax.toFixed(0)}%` };
+  }
+  // Dockの1行：[タグ] [HPバー(min濃/max淡・10%目盛)] [割合%] [結論]
+  function dockLine(tag, r, curHp) {
+    const s = r.summary;
+    const v = verdictShort(r, curHp);
+    const minP = Math.min(100, s.pctMin), maxP = Math.min(100, s.pctMax);
+    const bar = el("div", { class: "dmg-bar" }, [
+      el("div", { class: "bar-range " + v.cls, style: `width:${maxP}%` }),
+      el("div", { class: "bar-min " + v.cls, style: `width:${minP}%` }),
+    ]);
+    return el("div", { class: "dock-line " + v.cls }, [
+      el("span", { class: "dl-tag" }, tag),
+      bar,
+      el("span", { class: "dl-pct" }, `${s.pctMin.toFixed(0)}〜${s.pctMax.toFixed(0)}%`),
+      el("span", { class: "dl-verdict" }, v.txt),
+    ]);
   }
   // 乱数16通り（85〜100は各1/16で等確率）。丸めで同じダメージ値になる分を合算した確率を表示。
   function rollCells(rolls, maxHp, curHp) {
@@ -797,13 +840,15 @@ function damageTab(preset) {
         el("td", { class: (r.summary.guaranteed === 1 ? "bad" : "") }, r.summary.label),
       ]))),
     ]);
-    // 全技一括は表が大きいので固定部は空にし、非固定部へ出す（画面を覆わない）
-    result.replaceChildren();
-    resultMore.replaceChildren(
+    // 全技一括は表が大きいのでDockは1行に縮小し、表は通常スクロール領域へ出す。
+    dockLines.replaceChildren(el("div", { class: "dock-empty" }, `全技を計算（${rows.length}件）— 下の一覧で確認`));
+    resultMore.replaceChildren();
+    bulkWrap.replaceChildren(
       el("div", { class: "dmg-detail" }, `${attacker.nameJp} → ${defender.nameJp}（覚える攻撃技を一括計算・与ダメ割合の高い順）`),
       allTypeChips.node,
       rows.length ? el("div", { class: "table-wrap" }, table) : el("p", { class: "hint" }, "選択タイプの技がありません"),
     );
+    measureDock();
   }
 
   // コア入力（常時表示）: まずこの3つだけで結論が出る
@@ -872,28 +917,29 @@ function damageTab(preset) {
     el("div", { class: "sp-controls" }, [labeled("天候", weatherSel), labeled("フィールド", terrainSel), labeled("壁", screenSel)]),
   ]);
   const modRow = el("div", { class: "toggles" }, [
-    el("label", { class: "toggle" }, [cbCrit, " 急所"]),
     el("label", { class: "toggle" }, [cbBurn, " やけど(物理×0.5)"]),
     el("label", { class: "toggle" }, [cbAll, " 全技ダメ計（一括）"]),
   ]);
   const moreDetails = el("details", { class: "more" }, [
-    el("summary", {}, "詳細設定（SP・性格・とくせい・持ち物・ランク・天候・壁・急所など）"),
+    el("summary", {}, "詳細設定（SP・性格・とくせい・持ち物・ランク・天候・壁など）"),
     advGrid, fieldRow, modRow,
   ]);
 
-  // アクション行（攻守入替＝Bで追加 / 素早さ比較）。Aで下部Dockへ移設予定。
-  const speedCompareBtn = el("button", { type: "button", class: "mini act-btn", "data-testid": "speed-compare-btn",
-    onclick: () => speedCompareModal(attacker, defender) }, "⚡ 素早さ比較");
-  const actionRow = el("div", { class: "dmg-actions" }, [speedCompareBtn]);
+  // 詳細ボトムシート本体（内訳・乱数・合算ログ）。閉じている間もDOMは残す。
+  const sheetOverlay = el("div", { class: "sheet-overlay", hidden: "hidden", onclick: () => closeSheet() });
+  const sheet = el("div", { class: "dmg-sheet", "data-testid": "result-sheet", hidden: "hidden" }, [
+    el("div", { class: "sheet-head" }, [
+      el("span", { class: "card-sub" }, "計算の詳細"),
+      el("button", { type: "button", class: "modal-close", "aria-label": "閉じる", onclick: () => closeSheet() }, "✕"),
+    ]),
+    el("div", { class: "sheet-body" }, [resultMore, logPanel]),
+  ]);
 
-  // 結論を最上部に（モバイルでは画面上部に固定）→ 入力はその下
+  // 入力（スクロール領域）→ 全技表 → 固定Dock/シート/オーバーレイ（最後）
   root.append(
-    result,
-    resultMore,
-    logPanel,
-    actionRow,
-    el("p", { class: "hint" }, "ポケモンとわざを選ぶだけで結論が出ます。細かい調整は「詳細設定」。"),
-    coreGrid, moreDetails
+    el("p", { class: "hint" }, "ポケモンとわざを選ぶだけで結論が出ます。細かい調整は「詳細設定」。結果は画面下に表示。"),
+    coreGrid, moreDetails, bulkWrap,
+    sheetOverlay, sheet, resultDock,
   );
 
   // お気に入り/流行りから攻撃側プリセットを反映
