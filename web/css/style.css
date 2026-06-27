@@ -297,7 +297,7 @@ main { max-width: 920px; margin: 0 auto; padding: 14px 12px 32px; }
 .sp-input { width: 70px; text-align: center; }
 .stage-select { width: auto; }
 .search { margin: 12px 0; }
-.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; min-width: 0; }
 .field > label { font-size: .76rem; color: var(--dim); }
 
 .toggles { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 12px 0; }
@@ -342,8 +342,9 @@ main { max-width: 920px; margin: 0 auto; padding: 14px 12px 32px; }
 @media (max-width: 600px) { .type-chip { min-height: 34px; } }
 
 /* ダメージ計算 */
-.dmg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.card { background: var(--surface); border: 0; border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--frame); }
+/* グリッド列は minmax(0,1fr)（既定の min-width:auto を打ち消す）＝中身で横に膨らまない */
+.dmg-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px; }
+.card { background: var(--surface); border: 0; border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--frame); min-width: 0; }
 .card h3 { margin: 0 0 10px; font-size: .92rem; color: var(--accent); letter-spacing: .03em; }
 .dmg-result { margin-top: 16px; background: var(--surface); border: 0; border-radius: var(--radius); padding: 16px; text-align: center; box-shadow: var(--frame); }
 .dmg-result:empty { display: none; }
@@ -380,7 +381,7 @@ details.more .dmg-grid { margin-top: 8px; }
 .card-sub { margin: 0 0 8px; font-size: .82rem; color: var(--dim); }
 
 /* 検索付きポケモン選択（コンボボックス） */
-.poke-combo { position: relative; }
+.poke-combo { position: relative; min-width: 0; }
 .poke-search { background: var(--surface-2); color: var(--text); border: 0; border-radius: 2px; padding: 9px 10px; font-size: .9rem; width: 100%; font-family: inherit; box-shadow: inset 2px 2px 0 0 rgba(0,0,0,.45), 0 0 0 2px var(--line); }
 .poke-search::placeholder { color: var(--dim); font-size: .82rem; }
 .combo-list { position: absolute; z-index: var(--z-combo); top: 100%; left: 0; right: 0; margin: 4px 0 0; padding: 0; list-style: none; max-height: 260px; overflow-y: auto; background: var(--surface-2); border: 0; border-radius: 2px; box-shadow: 0 0 0 2px var(--line), 4px 6px 0 0 rgba(0,0,0,.5); }
@@ -390,14 +391,14 @@ details.more .dmg-grid { margin-top: 8px; }
 
 /* 乱数16通り */
 .rolls-head { margin-top: 12px; font-size: .76rem; color: var(--dim); text-align: left; }
-.roll-grid { margin-top: 6px; display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; }
+.roll-grid { margin-top: 6px; display: grid; grid-template-columns: repeat(8, minmax(0,1fr)); gap: 5px; }
 .roll-cell { display: flex; flex-direction: column; align-items: center; background: var(--surface-2); border: 0; border-radius: 2px; padding: 4px 2px; line-height: 1.15; box-shadow: 0 0 0 2px var(--line); }
 .roll-cell b { font-size: .8rem; font-variant-numeric: tabular-nums; }
 .roll-cell small { font-size: .64rem; color: var(--dim); font-variant-numeric: tabular-nums; }
 .roll-cell small.prob { color: var(--hl); }
 .roll-cell.ko { box-shadow: 0 0 0 2px var(--bad); }
 .roll-cell.ko small { color: var(--bad); }
-@media (max-width: 480px) { .roll-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 480px) { .roll-grid { grid-template-columns: repeat(4, minmax(0,1fr)); } }
 
 /* SP入力 */
 .sp-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 12px 0; }
@@ -406,7 +407,7 @@ details.more .dmg-grid { margin-top: 8px; }
 .total-badge.over { background: var(--bad); color: #fff; box-shadow: 0 0 0 2px #fff; }
 
 /* 最近使った（履歴）チップ */
-.recents { display: flex; flex-wrap: nowrap; gap: 7px; overflow-x: auto; padding-bottom: 4px; max-width: 100%; }
+.recents { display: flex; flex-wrap: nowrap; gap: 7px; overflow-x: auto; padding-bottom: 4px; max-width: 100%; min-width: 0; }
 .recents .chip-btn { flex: 0 0 auto; }
 .recents-empty { font-size: .74rem; }
 .chip-btn { font-size: .76rem; padding: 6px 10px; border-radius: 2px; border: 0; background: var(--surface-2); color: var(--text); cursor: pointer; font-family: inherit; box-shadow: inset 1px 1px 0 0 rgba(127,169,255,.4), inset -1px -1px 0 0 rgba(0,0,0,.5); }
@@ -418,19 +419,19 @@ input.locked { opacity: .85; cursor: not-allowed; }
 
 /* マイポケモン（お気に入り） */
 .fav-editor h3 { margin: 0 0 12px; font-size: 1rem; color: var(--accent); }
-.fav-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.fav-sp-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.fav-row2 { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; }
+.fav-sp-grid { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 6px; }
 .fav-sp-cell { display: flex; flex-direction: column; gap: 2px; font-size: .72rem; color: var(--dim); align-items: center; }
 .fav-sp-cell .sp-input { width: 100%; }
 .fav-statline { font-size: .78rem; margin: 8px 0 0; font-variant-numeric: tabular-nums; }
-.fav-move-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fav-move-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 8px; }
 .fav-note { font-family: inherit; resize: vertical; }
 .fav-actions { display: flex; gap: 8px; margin-top: 14px; }
 .tab-btn.primary { flex: 0 0 auto; padding: 11px 20px; background: var(--accent); color: #1a1a1a; border-radius: 2px; box-shadow: inset 2px 2px 0 0 rgba(255,255,255,.5), inset -2px -2px 0 0 rgba(0,0,0,.3), 2px 2px 0 0 rgba(0,0,0,.5); }
 .tab-btn.primary:hover { filter: brightness(1.08); }
 .fav-actions .tab-btn { border-radius: 2px; }
 .fav-list-title { font-size: 1rem; margin: 20px 0 10px; color: var(--accent); }
-.fav-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.fav-list { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px; }
 .fav-card { display: flex; flex-direction: column; gap: 4px; }
 .fav-card-head { font-size: .95rem; font-weight: 700; }
 .fav-card-meta, .fav-card-note { font-size: .76rem; }
@@ -465,9 +466,9 @@ button.mini.danger:hover { background: var(--bad); color: #fff; }
 }
 
 @media (max-width: 480px) {
-  .dmg-grid { grid-template-columns: 1fr; }
-  .fav-list { grid-template-columns: 1fr; }
-  .fav-move-grid { grid-template-columns: 1fr; }
+  .dmg-grid { grid-template-columns: minmax(0,1fr); }
+  .fav-list { grid-template-columns: minmax(0,1fr); }
+  .fav-move-grid { grid-template-columns: minmax(0,1fr); }
   .site-header h1 { font-size: 1.05rem; }
   /* 狭い画面では御三家を小さくして上部中央寄りに（タイトルと重なり防止） */
   .header-mascots { position: static; justify-content: center; margin-bottom: 6px; gap: 6px; }
@@ -495,6 +496,8 @@ button.mini.danger:hover { background: var(--bad); color: #fff; }
   .tri, .chip-btn, button.mini, select, .search, .poke-search, .move-select { min-height: 44px; }
   .toggle { min-height: 36px; }
 
+  /* 横ズレ最終防御：万一の横はみ出しでも画面外スクロールを起こさない（根本修正は minmax(0,1fr)） */
+  html, body { overflow-x: hidden; }
   /* 密度アップ：見える範囲を広げる（DotGothicは維持しサイズ・余白・字間だけ圧縮） */
   body { letter-spacing: 0; line-height: 1.4; }
   main { padding: 10px 10px 76px; }
@@ -550,7 +553,7 @@ button.mini.act-btn { padding: 9px 14px; font-weight: 700; }
   box-shadow: inset 1px 1px 0 0 rgba(127,169,255,.4), inset -1px -1px 0 0 rgba(0,0,0,.5);
 }
 /* 2体カラム見出し */
-.spc-cols { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: start; margin-bottom: 8px; }
+.spc-cols { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); gap: 8px; align-items: start; margin-bottom: 8px; }
 .spc-col-head { background: var(--surface); border-radius: 2px; padding: 8px; box-shadow: 0 0 0 2px var(--line); }
 .spc-name { font-weight: 700; font-size: .9rem; text-align: center; }
 .spc-base { text-align: center; font-size: .8rem; margin: 4px 0; }
@@ -561,7 +564,7 @@ button.mini.act-btn { padding: 9px 14px; font-weight: 700; }
 .spc-stage-val { min-width: 1.6em; text-align: center; font-variant-numeric: tabular-nums; }
 .spc-ctrl .toggle { font-size: .72rem; justify-content: center; }
 /* 比較段 */
-.spc-row { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; padding: 6px 4px; border-bottom: 2px solid var(--bg); }
+.spc-row { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); gap: 8px; align-items: center; padding: 6px 4px; border-bottom: 2px solid var(--bg); }
 .spc-tier { text-align: center; font-size: .76rem; color: var(--dim); white-space: nowrap; }
 .spc-v { text-align: center; font-size: 1.05rem; font-variant-numeric: tabular-nums; font-weight: 700; }
 .spc-v.fast { color: var(--good); }
@@ -571,7 +574,7 @@ button.mini.act-btn { padding: 9px 14px; font-weight: 700; }
 .dmg-result-dock { background: var(--surface); border-radius: var(--radius); box-shadow: var(--frame); padding: 8px 10px; margin-top: 10px; }
 .dock-lines { display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
 .dock-empty { color: var(--dim); font-size: .82rem; text-align: center; padding: 6px; }
-.dock-line { display: grid; grid-template-columns: 2.4em 1fr auto auto; gap: 8px; align-items: center; }
+.dock-line { display: grid; grid-template-columns: 2.4em minmax(0,1fr) auto auto; gap: 8px; align-items: center; }
 .dl-tag { font-size: .74rem; color: var(--dim); }
 .dl-pct { font-size: .82rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dl-verdict { font-size: .78rem; font-weight: 700; white-space: nowrap; min-width: 5em; text-align: right; }
