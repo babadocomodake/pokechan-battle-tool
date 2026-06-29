@@ -145,6 +145,135 @@ function pokemonSelect(onChange, id) {
   setValue(value, false);
   return wrap;
 }
+
+// ========== サムネ付きポケモン選択モーダル（スクショ準拠） ==========
+// スプライトは Pokémon Showdown(gen5) を外部参照。メガは base-mega(x/y)、
+// 失敗時は基本形→非表示の順にフォールバック（ローカル画像は持たない）。
+const SPRITE_BASE = "https://play.pokemonshowdown.com/sprites/gen5/";
+function pokeSpriteUrls(p) {
+  const clean = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (p.form === "Mega") {
+    let base = p.name.replace(/^Mega\s+/i, "");
+    let xy = "";
+    const m = base.match(/\s+(X|Y)$/i);
+    if (m) { xy = m[1].toLowerCase(); base = base.replace(/\s+(X|Y)$/i, ""); }
+    const baseId = clean(base);
+    return [`${SPRITE_BASE}${baseId}-mega${xy}.png`, `${SPRITE_BASE}${baseId}.png`];
+  }
+  return [`${SPRITE_BASE}${clean(p.name)}.png`];
+}
+function pokeSprite(p, cls) {
+  const urls = pokeSpriteUrls(p);
+  let i = 0;
+  const img = el("img", { class: cls || "poke-sprite", alt: p.nameJp, loading: "lazy", src: urls[0] });
+  img.addEventListener("error", () => {
+    i += 1;
+    if (i < urls.length) img.src = urls[i];
+    else { img.classList.add("sprite-missing"); img.removeAttribute("src"); }
+  });
+  return img;
+}
+
+// 攻撃/受けの選択モーダル本体。opts.onPick(p, { preset }) で確定。
+// 連続入力ONなら開いたまま、OFFなら1体選ぶと閉じる。
+function openPokePicker(opts) {
+  const isAtk = opts.role === "atk";
+  const title = isAtk ? "攻撃側ポケモン" : "受け側ポケモン";
+  const recentKey = isAtk ? RECENT_ATK_KEY : RECENT_DEF_KEY;
+  const all = [...store.legalPokemon].sort(byUsage);
+  let keepOpen = true;   // 連続入力（既定ON）
+  let showHist = false;  // 履歴表示トグル
+
+  // クイック努力値ボタン: 攻=0/32/32(補正)、受=0/H/HBD。preset は damageTab 側で解釈。
+  const quickDefs = isAtk
+    ? [{ label: "0", preset: "atk0", t: "無振り" }, { label: "32", preset: "atkMax", t: "252振り(無補正)" }, { label: "32", preset: "atkMaxBoost", cls: "hot", t: "252振り＋性格↑" }]
+    : [{ label: "0", preset: "def0", t: "無振り" }, { label: "H", preset: "defH", t: "HP振り" }, { label: "HBD", preset: "defHBD", cls: "hot", t: "耐久ぶっぱ(HP＋防御)" }];
+
+  const overlay = el("div", { class: "modal-overlay", "data-testid": "poke-picker" });
+  const panel = el("div", { class: "modal-panel picker-panel" });
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+  const search = el("input", { type: "search", class: "poke-search picker-search", autocomplete: "off",
+    placeholder: "🔍 ひらがな/カタカナ/英字で検索" });
+  const listEl = el("div", { class: "picker-list" });
+
+  function pick(p, preset) {
+    opts.onPick(p, { preset });
+    if (keepOpen) showToast(`${p.nameJp} を反映`);
+    else close();
+  }
+  function rowFor(p) {
+    const quicks = quickDefs.map((qd) => el("button", { type: "button", class: "picker-quick" + (qd.cls ? ` ${qd.cls}` : ""), title: qd.t,
+      onclick: (e) => { e.stopPropagation(); pick(p, qd.preset); } }, qd.label));
+    return el("div", { class: "picker-row" + (p.name === opts.current ? " current" : ""), onclick: () => pick(p, null) }, [
+      pokeSprite(p, "picker-sprite"),
+      el("span", { class: "picker-name" }, p.nameJp),
+      el("div", { class: "picker-quicks" }, quicks),
+    ]);
+  }
+  function renderList() {
+    const q = search.value;
+    const kids = [];
+    if (showHist && !q) {
+      const recents = loadRecent(recentKey).map((x) => store.pokemonByName.get(typeof x === "string" ? x : x.pokemon)).filter(Boolean).slice(0, 8);
+      if (recents.length) {
+        kids.push(el("div", { class: "picker-sec" }, "最近使った"));
+        kids.push(...recents.map(rowFor));
+        kids.push(el("div", { class: "picker-sec" }, "すべて"));
+      }
+    }
+    const items = all.filter((p) => pokeMatches(p, q)).slice(0, 60);
+    if (!items.length && !kids.length) { listEl.replaceChildren(el("p", { class: "hint" }, "該当なし")); return; }
+    kids.push(...items.map(rowFor));
+    listEl.replaceChildren(...kids);
+  }
+  search.addEventListener("input", renderList);
+
+  const histCb = el("input", { type: "checkbox", onchange: (e) => { showHist = e.target.checked; renderList(); } });
+  const keepCb = el("input", { type: "checkbox", checked: "checked", onchange: (e) => { keepOpen = e.target.checked; } });
+
+  panel.append(
+    el("div", { class: "modal-head picker-head" }, [
+      el("label", { class: "toggle picker-tg" }, [histCb, " 履歴"]),
+      el("h3", {}, title),
+      el("label", { class: "toggle picker-tg" }, [keepCb, " 連続入力"]),
+      el("button", { type: "button", class: "modal-close", "aria-label": "閉じる", onclick: close }, "✕"),
+    ]),
+    el("div", { class: "picker-searchrow" }, [search]),
+    listEl,
+  );
+  overlay.append(panel);
+  renderList();
+  document.body.appendChild(overlay);
+  search.focus();
+  return overlay;
+}
+
+// 選択トリガー（サムネ＋名前のボタン）。クリックでモーダルを開く。
+// 互換: pokemonSelect と同じく .value で英語名を get/set（set は onChange 非発火）。
+// onChange(p, preset) … preset はクイック努力値ボタンの種別（無ければ null）。
+function pokePicker(role, onChange, id) {
+  let value = [...store.legalPokemon].sort(byUsage)[0]?.name || "";
+  const spriteWrap = el("span", { class: "trigger-sprite" });
+  const nameEl = el("span", { class: "trigger-name" });
+  const btn = el("button", { type: "button", class: "poke-trigger", id,
+    onclick: () => openPokePicker({ role, current: value, onPick: (p, info) => setValue(p.name, true, info.preset) }) },
+    [spriteWrap, nameEl, el("span", { class: "trigger-caret" }, "▼")]);
+
+  function paint() {
+    const p = store.pokemonByName.get(value);
+    spriteWrap.replaceChildren(p ? pokeSprite(p, "trigger-sprite-img") : "");
+    nameEl.textContent = p ? p.nameJp : "（選択）";
+  }
+  function setValue(name, fire, preset) {
+    value = name; paint();
+    if (fire) onChange(store.pokemonByName.get(name), preset);
+  }
+  Object.defineProperty(btn, "value", { get: () => value, set: (v) => setValue(v, false) });
+  paint();
+  return btn;
+}
 function natureSelect(id) {
   const opts = [...store.natures]
     .sort((a, b) => (NATURE_JP[a.name] || a.name).localeCompare(NATURE_JP[b.name] || b.name, "ja"))
@@ -461,7 +590,14 @@ function damageTab(preset) {
   let attacker, defender;
 
   // 攻撃側
-  const atkSel = pokemonSelect((p) => { attacker = p; pushRecent(RECENT_ATK_KEY, p.name, RECENT_CAP); renderAtkRecents(); refreshMoves(); fillAbilitySelect(atkAbilSel, p); applyMega(atkItemSel, p); render(); }, "atk-poke");
+  const atkSel = pokePicker("atk", (p, preset) => { attacker = p; pushRecent(RECENT_ATK_KEY, p.name, RECENT_CAP); renderAtkRecents(); refreshMoves(); fillAbilitySelect(atkAbilSel, p); applyMega(atkItemSel, p); applyAtkPreset(preset); render(); }, "atk-poke");
+  // クイック努力値プリセット（選択モーダルのボタン）を攻撃側ステッパーに反映。
+  function applyAtkPreset(preset) {
+    if (!preset) return;
+    if (preset === "atk0") { atkSP.value = "0"; atkNature.set("neutral"); }
+    else if (preset === "atkMax") { atkSP.value = String(SP_MAX_PER_STAT); atkNature.set("neutral"); }
+    else if (preset === "atkMaxBoost") { atkSP.value = String(SP_MAX_PER_STAT); atkNature.set("up"); }
+  }
   const moveSel = el("select", { class: "move-select", onchange: render });
   // #2 わざ検索（かな/英/部分一致でわざ欄を絞り込み）
   const moveSearch = el("input", { type: "search", class: "search move-search", placeholder: "🔍 わざ名で絞り込み（かな/英）",
@@ -527,7 +663,15 @@ function damageTab(preset) {
   } }, "この攻撃をマイポケモンに登録");
 
   // 防御側
-  const defSel = pokemonSelect((p) => commitDefenderSelection(p), "def-poke");
+  const defSel = pokePicker("def", (p, preset) => { commitDefenderSelection(p); applyDefPreset(preset); }, "def-poke");
+  // クイック努力値プリセット（選択モーダルのボタン）を防御側ステッパーに反映。
+  function applyDefPreset(preset) {
+    if (!preset) return;
+    if (preset === "def0") { defHpSP.value = "0"; defSP.value = "0"; defNat.set("neutral"); }
+    else if (preset === "defH") { defHpSP.value = String(SP_MAX_PER_STAT); defSP.value = "0"; defNat.set("neutral"); }
+    else if (preset === "defHBD") { defHpSP.value = String(SP_MAX_PER_STAT); defSP.value = String(SP_MAX_PER_STAT); defNat.set("up"); }
+    render();
+  }
   const defRecents = el("div", { class: "recents" });
   // 履歴要素(旧:文字列 / 新:スナップショット)を正規化。
   function asSnap(x) { return typeof x === "string" ? { pokemon: x } : (x || {}); }
