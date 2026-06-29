@@ -200,8 +200,10 @@ function openPokePicker(opts) {
 
   function pick(p, preset) {
     opts.onPick(p, { preset });
-    if (keepOpen) showToast(`${p.nameJp} を反映`);
-    else close();
+    // 連続入力ON＋次工程あり → 閉じて次モーダル（ポケ→わざ→道具）。
+    if (keepOpen && opts.chainNext) { close(); opts.chainNext(); return; }
+    if (keepOpen && !opts.chainNext) { showToast(`${p.nameJp} を反映`); return; }
+    close();
   }
   function rowFor(p) {
     const quicks = quickDefs.map((qd) => el("button", { type: "button", class: "picker-quick" + (qd.cls ? ` ${qd.cls}` : ""), title: qd.t,
@@ -253,12 +255,13 @@ function openPokePicker(opts) {
 // 選択トリガー（サムネ＋名前のボタン）。クリックでモーダルを開く。
 // 互換: pokemonSelect と同じく .value で英語名を get/set（set は onChange 非発火）。
 // onChange(p, preset) … preset はクイック努力値ボタンの種別（無ければ null）。
-function pokePicker(role, onChange, id) {
+// opts.chainNext … 連続入力ONのとき選択後に呼ぶ次工程（わざ/道具モーダル）。
+function pokePicker(role, onChange, id, opts = {}) {
   let value = [...store.legalPokemon].sort(byUsage)[0]?.name || "";
   const spriteWrap = el("span", { class: "trigger-sprite" });
   const nameEl = el("span", { class: "trigger-name" });
   const btn = el("button", { type: "button", class: "poke-trigger", id,
-    onclick: () => openPokePicker({ role, current: value, onPick: (p, info) => setValue(p.name, true, info.preset) }) },
+    onclick: () => openPokePicker({ role, current: value, chainNext: opts.chainNext, onPick: (p, info) => setValue(p.name, true, info.preset) }) },
     [spriteWrap, nameEl, el("span", { class: "trigger-caret" }, "▼")]);
 
   function paint() {
@@ -273,6 +276,89 @@ function pokePicker(role, onChange, id) {
   Object.defineProperty(btn, "value", { get: () => value, set: (v) => setValue(v, false) });
   paint();
   return btn;
+}
+
+// 道具アイコン（PokeAPIの個別PNG）。英名→kebab。失敗時は非表示。
+function itemSprite(itemName, cls) {
+  const id = (itemName || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const img = el("img", { class: cls || "item-icon", alt: "", loading: "lazy",
+    src: `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/${id}.png` });
+  img.addEventListener("error", () => { img.classList.add("sprite-missing"); img.removeAttribute("src"); });
+  return img;
+}
+
+// わざ選択モーダル（採用%＋タイプ色＋分類＋威力）。選ぶと chainNext（道具）へ。
+// opts: { current, getMoves(query)->[{m,rate,stab}], onPick(m), chainNext? }
+function openMovePicker(opts) {
+  const overlay = el("div", { class: "modal-overlay", "data-testid": "move-picker" });
+  const panel = el("div", { class: "modal-panel picker-panel" });
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  const search = el("input", { type: "search", class: "poke-search picker-search", autocomplete: "off", placeholder: "🔍 わざ名…" });
+  const listEl = el("div", { class: "picker-list" });
+
+  function pick(m) { opts.onPick(m); close(); if (opts.chainNext) opts.chainNext(); }
+  function renderList() {
+    const rows = opts.getMoves(search.value).map(({ m, rate, stab }) => {
+      const cat = m.category === "Physical" ? "物" : m.category === "Special" ? "特" : "変";
+      return el("div", { class: "picker-row move-row" + (m.name === opts.current ? " current" : ""), onclick: () => pick(m) }, [
+        el("span", { class: "picker-name" }, `${stab ? "★" : ""}${m.nameJp || m.name}`),
+        el("span", { class: "move-rate" }, rate >= 0 ? `${rate}%` : ""),
+        el("span", { class: `type type-${(m.type || "").toLowerCase()} move-type` }, TYPE_JP[m.type] || m.type || ""),
+        el("span", { class: "move-cat" }, cat),
+        el("span", { class: "move-pow" }, m.power ? String(m.power) : "—"),
+      ]);
+    });
+    listEl.replaceChildren(...(rows.length ? rows : [el("p", { class: "hint" }, "該当なし")]));
+  }
+  search.addEventListener("input", renderList);
+  panel.append(
+    el("div", { class: "modal-head picker-head" }, [el("span", { class: "picker-tg" }), el("h3", {}, "わざを選ぶ"),
+      el("button", { type: "button", class: "modal-close", "aria-label": "閉じる", onclick: close }, "✕")]),
+    el("div", { class: "picker-searchrow" }, [search]),
+    listEl,
+  );
+  overlay.append(panel); renderList(); document.body.appendChild(overlay); search.focus();
+  return overlay;
+}
+
+// 道具選択モーダル（名前＋効果＋アイコン）。最後の工程なので選ぶと閉じる。
+// opts: { side:"atk"|"def", current, onPick(itemName) }
+function openItemPicker(opts) {
+  const overlay = el("div", { class: "modal-overlay", "data-testid": "item-picker" });
+  const panel = el("div", { class: "modal-panel picker-panel" });
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  const search = el("input", { type: "search", class: "poke-search picker-search", autocomplete: "off", placeholder: "🔍 道具名…" });
+  const listEl = el("div", { class: "picker-list" });
+  const all = roleItems(opts.side);
+
+  function pick(name) { opts.onPick(name); close(); }
+  function rowFor(it) {
+    const r = it ? itemRole(it) : null;
+    const name = it ? it.nameJp : "- - - - なし - - - -";
+    return el("div", { class: "picker-row item-row" + ((it ? it.name : "") === (opts.current || "") ? " current" : ""), onclick: () => pick(it ? it.name : "") }, [
+      el("div", { class: "item-main" }, [el("span", { class: "picker-name" }, name), r && r.jp ? el("small", { class: "item-eff" }, r.jp) : null].filter(Boolean)),
+      it ? itemSprite(it.name, "item-icon") : el("span", { class: "item-icon" }),
+    ]);
+  }
+  function renderList() {
+    const q = search.value.trim();
+    const items = all.filter((it) => !q || normJa(it.nameJp).includes(normJa(q)) || normJa(it.name).includes(normJa(q)));
+    const kids = [];
+    if (!q) kids.push(rowFor(null)); // 先頭に「なし」
+    kids.push(...items.map(rowFor));
+    listEl.replaceChildren(...(kids.length ? kids : [el("p", { class: "hint" }, "該当なし")]));
+  }
+  search.addEventListener("input", renderList);
+  panel.append(
+    el("div", { class: "modal-head picker-head" }, [el("span", { class: "picker-tg" }), el("h3", {}, "もちものを選ぶ"),
+      el("button", { type: "button", class: "modal-close", "aria-label": "閉じる", onclick: close }, "✕")]),
+    el("div", { class: "picker-searchrow" }, [search]),
+    listEl,
+  );
+  overlay.append(panel); renderList(); document.body.appendChild(overlay); search.focus();
+  return overlay;
 }
 function natureSelect(id) {
   const opts = [...store.natures]
@@ -590,7 +676,29 @@ function damageTab(preset) {
   let attacker, defender;
 
   // 攻撃側
-  const atkSel = pokePicker("atk", (p, preset) => { attacker = p; pushRecent(RECENT_ATK_KEY, p.name, RECENT_CAP); renderAtkRecents(); refreshMoves(); fillAbilitySelect(atkAbilSel, p); applyMega(atkItemSel, p); applyAtkPreset(preset); render(); }, "atk-poke");
+  const atkSel = pokePicker("atk", (p, preset) => { attacker = p; pushRecent(RECENT_ATK_KEY, p.name, RECENT_CAP); renderAtkRecents(); refreshMoves(); fillAbilitySelect(atkAbilSel, p); applyMega(atkItemSel, p); applyAtkPreset(preset); render(); }, "atk-poke", { chainNext: () => openAtkMoveStep() });
+  // ウィザード: 攻撃= ポケモン→わざ→道具。各モーダルは native select に値を書き込む。
+  function movesForPicker(query = "") {
+    const adopt = moveAdoption();
+    const q = (query || "").trim();
+    let list = attackingMovesFor(attacker);
+    if (q) list = list.filter((m) => normJa(m.nameJp || "").includes(normJa(q)) || normJa(m.name).includes(normJa(q)));
+    const isStab = (m) => (attacker.types || []).includes(m.type);
+    const rateOf = (m) => (adopt[m.nameJp] ?? adopt[m.name] ?? -1);
+    return list.slice()
+      .sort((a, b) => (isStab(b) - isStab(a)) || (rateOf(b) - rateOf(a)) || ((b.power || 0) - (a.power || 0)))
+      .map((m) => ({ m, rate: rateOf(m), stab: isStab(m) }));
+  }
+  function openAtkMoveStep() {
+    openMovePicker({ current: moveSel.value, getMoves: movesForPicker,
+      onPick: (m) => { moveSel.value = m.name; moveSel.dispatchEvent(new Event("change")); },
+      chainNext: () => openAtkItemStep() });
+  }
+  function openAtkItemStep() {
+    if (atkItemSel.disabled) return; // メガストーン固定時はスキップ
+    openItemPicker({ side: "atk", current: atkItemSel.value,
+      onPick: (name) => { atkItemSel.value = name; atkItemSel.dispatchEvent(new Event("change")); } });
+  }
   // クイック努力値プリセット（選択モーダルのボタン）を攻撃側ステッパーに反映。
   function applyAtkPreset(preset) {
     if (!preset) return;
@@ -663,7 +771,13 @@ function damageTab(preset) {
   } }, "この攻撃をマイポケモンに登録");
 
   // 防御側
-  const defSel = pokePicker("def", (p, preset) => { commitDefenderSelection(p); applyDefPreset(preset); }, "def-poke");
+  const defSel = pokePicker("def", (p, preset) => { commitDefenderSelection(p); applyDefPreset(preset); }, "def-poke", { chainNext: () => openDefItemStep() });
+  // ウィザード: 受け= ポケモン→道具。
+  function openDefItemStep() {
+    if (defItemSel.disabled) return; // メガストーン固定時はスキップ
+    openItemPicker({ side: "def", current: defItemSel.value,
+      onPick: (name) => { defItemSel.value = name; defItemSel.dispatchEvent(new Event("change")); } });
+  }
   // クイック努力値プリセット（選択モーダルのボタン）を防御側ステッパーに反映。
   function applyDefPreset(preset) {
     if (!preset) return;

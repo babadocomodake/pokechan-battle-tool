@@ -565,32 +565,48 @@ button.mini.act-btn { padding: 9px 14px; font-weight: 700; }
 .trigger-name { flex: 1 1 auto; font-size: .95rem; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trigger-caret { flex: 0 0 auto; color: var(--dim); font-size: .8rem; }
 
-.picker-panel { max-width: 460px; padding: 12px; }
-.picker-head { gap: 8px; }
-.picker-head h3 { flex: 1 1 auto; text-align: center; font-size: .95rem; }
-.picker-tg { font-size: .74rem; white-space: nowrap; }
-.picker-searchrow { margin-bottom: 8px; }
-.picker-list { max-height: 62vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
-.picker-sec { font-size: .72rem; color: var(--dim); padding: 6px 4px 2px; }
+/* コンパクト化：外側の余白を詰め、リストの表示数を増やす */
+.picker-panel { max-width: 460px; max-height: 92vh; padding: 8px; }
+.picker-head { gap: 6px; margin-bottom: 6px; }
+.picker-head h3 { flex: 1 1 auto; text-align: center; font-size: .92rem; }
+.picker-head .modal-close { padding: 4px 10px; min-height: 32px; }
+.picker-tg { font-size: .72rem; white-space: nowrap; }
+.picker-searchrow { margin-bottom: 6px; }
+.picker-search { padding: 7px 9px; }
+.picker-list { max-height: 66vh; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.picker-sec { font-size: .7rem; color: var(--dim); padding: 5px 4px 1px; }
 .picker-row {
-  display: grid; grid-template-columns: 40px minmax(0,1fr) auto; gap: 8px; align-items: center;
-  padding: 4px 6px; border-radius: 2px; cursor: pointer; background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--line);
+  display: grid; grid-template-columns: 34px minmax(0,1fr) auto; gap: 8px; align-items: center;
+  padding: 2px 6px; border-radius: 2px; cursor: pointer; background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line); min-height: 40px;
 }
 .picker-row:hover { background: var(--surface-2); }
 .picker-row.current { box-shadow: inset 0 0 0 2px var(--accent); }
-.picker-sprite { width: 40px; height: 40px; image-rendering: pixelated; object-fit: contain; }
+.picker-sprite { width: 34px; height: 34px; image-rendering: pixelated; object-fit: contain; }
 .picker-sprite.sprite-missing { background: var(--surface-2); border-radius: 50%; }
-.picker-name { font-size: .9rem; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-name { font-size: .88rem; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-quicks { display: flex; gap: 4px; flex: 0 0 auto; }
 .picker-quick {
-  min-width: 38px; min-height: 38px; padding: 4px 8px; border: 0; cursor: pointer; font-family: inherit;
+  min-width: 36px; min-height: 36px; padding: 3px 8px; border: 0; cursor: pointer; font-family: inherit;
   font-size: .82rem; font-weight: 700; border-radius: 2px; color: #4a3a00;
   background: #ffe14d;
   box-shadow: inset 1px 1px 0 0 rgba(255,255,255,.6), inset -1px -1px 0 0 rgba(0,0,0,.3);
 }
 .picker-quick.hot { color: #b00; }
 .picker-quick:hover { filter: brightness(1.05); }
+
+/* わざ行：名前｜採用%｜タイプ｜分類｜威力 */
+.picker-row.move-row { grid-template-columns: minmax(0,1fr) auto auto 1.6em 2.4em; gap: 6px; }
+.move-rate { font-size: .74rem; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.move-type { font-size: .68rem; padding: 1px 5px; }
+.move-cat { font-size: .76rem; text-align: center; color: var(--dim); }
+.move-pow { font-size: .82rem; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* 道具行：名前(＋効果)｜アイコン */
+.picker-row.item-row { grid-template-columns: minmax(0,1fr) 30px; }
+.item-main { display: flex; flex-direction: column; min-width: 0; }
+.item-eff { font-size: .68rem; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-icon { width: 30px; height: 30px; object-fit: contain; image-rendering: pixelated; }
 
 /* 2体カラム見出し */
 .spc-cols { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); gap: 8px; align-items: start; margin-bottom: 8px; }
