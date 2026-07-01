@@ -348,6 +348,12 @@ function openItemPicker(opts) {
     const kids = [];
     if (!q) kids.push(rowFor(null)); // 先頭に「なし」
     kids.push(...items.map(rowFor));
+    // 絞り込み前で候補が「なし」しか無い＝この構成で計算に効く合法道具が無い旨を明示（空っぽに見えない）
+    if (!q && all.length === 0) {
+      kids.push(el("p", { class: "hint" }, opts.side === "def"
+        ? "現レギュでは防御ダメージに影響する合法道具はありません（例: とつげきチョッキ/しんかのきせきは対象外）"
+        : "この条件で計算に影響する合法道具はありません"));
+    }
     listEl.replaceChildren(...(kids.length ? kids : [el("p", { class: "hint" }, "該当なし")]));
   }
   search.addEventListener("input", renderList);
@@ -859,6 +865,39 @@ function damageTab(preset) {
   const defAbilSel = el("select", { class: "abil-select", onchange: render });
   const defItemSel = realItemSelect("def", render);
   const remainHp = el("input", { type: "number", min: "0", max: "100", value: "100", class: "sp-input", id: "def-remain" });
+
+  // 技/道具は「トリガーボタン→モーダル」で選ぶ。native select は隠して計算・連鎖用に保持し、
+  // 値が変わるたび paintFieldTriggers() でボタンの表示名を同期する。
+  function makeFieldTrigger(onOpen) {
+    const nameEl = el("span", { class: "trigger-name" });
+    const btn = el("button", { type: "button", class: "poke-trigger field-trigger", onclick: onOpen },
+      [nameEl, el("span", { class: "trigger-caret" }, "▼")]);
+    btn._paint = (text) => { nameEl.textContent = text; };
+    return btn;
+  }
+  const moveTrig = makeFieldTrigger(() => openMovePicker({
+    current: moveSel.value, getMoves: movesForPicker,
+    onPick: (m) => { moveSel.value = m.name; moveSel.dispatchEvent(new Event("change")); },
+  }));
+  const atkItemTrig = makeFieldTrigger(() => {
+    if (atkItemSel.disabled) return; // メガストーン固定時は開かない
+    openItemPicker({ side: "atk", current: atkItemSel.value,
+      onPick: (name) => { atkItemSel.value = name; atkItemSel.dispatchEvent(new Event("change")); } });
+  });
+  const defItemTrig = makeFieldTrigger(() => {
+    if (defItemSel.disabled) return;
+    openItemPicker({ side: "def", current: defItemSel.value,
+      onPick: (name) => { defItemSel.value = name; defItemSel.dispatchEvent(new Event("change")); } });
+  });
+  function paintFieldTriggers() {
+    const mv = store.movesByName.get(moveSel.value);
+    moveTrig._paint(mv ? (mv.nameJp || mv.name) : "＋ わざを選ぶ");
+    const ai = store.itemsByName.get(atkItemSel.value);
+    atkItemTrig._paint(atkItemSel.disabled ? "（メガストーン固定）" : (ai ? ai.nameJp : "道具なし（タップで選ぶ）"));
+    const di = store.itemsByName.get(defItemSel.value);
+    defItemTrig._paint(defItemSel.disabled ? "（メガストーン固定）" : (di ? di.nameJp : "道具なし（タップで選ぶ）"));
+  }
+  const hiddenNative = (kids) => el("div", { class: "hidden-native", "aria-hidden": "true" }, kids);
   // 防御側: ランキングから選択（名前のみ反映）
   const defRankPickSel = el("select", { class: "item-select" }, rankOptions("ランキングから選択…"));
   defRankPickSel.addEventListener("change", () => {
@@ -1024,6 +1063,7 @@ function damageTab(preset) {
   }
 
   function render() {
+    paintFieldTriggers(); // 技/道具トリガーの表示名を最新化
     // 防御履歴の先頭が現在の防御ポケモンなら、編集中の設定を逐次反映（実際に使った状態を保存）。
     // 内容が変わった時だけチップを再描画して、表示と復元データを最新に保つ。
     if (syncRecentSnapFront(RECENT_DEF_KEY, defSnapshot())) renderRecents();
@@ -1177,7 +1217,7 @@ function damageTab(preset) {
       labeled("ポケモン", atkSel),
       el("div", { class: "fav-row2" }, [labeled("お気に入りから", atkFavSel), labeled("ランキングから", atkRankPickSel)]),
       el("div", { class: "field" }, [el("label", {}, "最近使った攻撃"), atkRecents]),
-      el("div", { class: "field" }, [el("label", {}, "わざ"), moveSearch, moveSel]),
+      el("div", { class: "field" }, [el("label", {}, "わざ"), moveTrig, hiddenNative([moveSearch, moveSel])]),
       el("div", { class: "fav-actions" }, [atkSaveBtn]),
     ]),
     el("section", { class: "card" }, [
@@ -1219,7 +1259,7 @@ function damageTab(preset) {
       atkPresets,
       el("div", { class: "fav-row2" }, [labeled("性格補正", atkNature), labeled("ランク補正", atkRankSel)]),
       labeled("とくせい", atkAbilSel),
-      labeled("持ち物", atkItemSel),
+      el("div", { class: "field" }, [el("label", {}, "持ち物"), atkItemTrig, hiddenNative([atkItemSel])]),
     ]),
     el("section", { class: "card" }, [
       el("h4", { class: "card-sub" }, "防御側の詳細"),
@@ -1228,7 +1268,7 @@ function damageTab(preset) {
       el("div", { class: "fav-row2" }, [labeled("性格補正", defNat), labeled("残りHP(%)", remainHp)]),
       labeled("ランク補正", defRankSel),
       labeled("とくせい", defAbilSel),
-      labeled("持ち物", defItemSel),
+      el("div", { class: "field" }, [el("label", {}, "持ち物"), defItemTrig, hiddenNative([defItemSel])]),
     ]),
   ]);
   const fieldRow = el("section", { class: "card" }, [

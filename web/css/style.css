@@ -695,3 +695,15 @@ button.mini.act-btn { padding: 9px 14px; font-weight: 700; }
   max-width: 90vw; text-align: center;
 }
 .app-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* === iOS Safari の「フォーカスで自動ズーム」対策 ===
+   16px未満の入力欄にフォーカスすると iOS が勝手にズームし戻らない。
+   フォーカス対象（input/select）だけ16pxに固定して自動ズームを止める。
+   ※メディアクエリより後に置くことで、スマホ幅の縮小指定より優先される。 */
+input, select, textarea,
+.search, .poke-search, .picker-search, .sp-input, .move-search {
+  font-size: 16px;
+}
+
+/* 計算用に残すネイティブ<select>を隠す（値の保持・連鎖入力には使う） */
+.hidden-native { display: none !important; }
