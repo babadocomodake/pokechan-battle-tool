@@ -217,6 +217,12 @@ function openPokePicker(opts) {
   function renderList() {
     const q = search.value;
     const kids = [];
+    // 連鎖入力で既に相手が設定済みのとき、「変更しない」で現状維持のまま次工程へ進める行
+    if (opts.keepLabel && !q) {
+      kids.push(el("div", { class: "picker-row picker-keep", onclick: () => { close(); if (opts.chainNext) opts.chainNext(); } }, [
+        el("span", { class: "picker-name" }, `↩ ${opts.keepLabel}`),
+      ]));
+    }
     if (showHist && !q) {
       const recents = loadRecent(recentKey).map((x) => store.pokemonByName.get(typeof x === "string" ? x : x.pokemon)).filter(Boolean).slice(0, 8);
       if (recents.length) {
@@ -260,9 +266,14 @@ function pokePicker(role, onChange, id, opts = {}) {
   let value = [...store.legalPokemon].sort(byUsage)[0]?.name || "";
   const spriteWrap = el("span", { class: "trigger-sprite" });
   const nameEl = el("span", { class: "trigger-name" });
-  const btn = el("button", { type: "button", class: "poke-trigger", id,
-    onclick: () => openPokePicker({ role, current: value, chainNext: opts.chainNext, onPick: (p, info) => setValue(p.name, true, info.preset) }) },
+  // 通常クリックとプログラム起動（連鎖）で共通のオープン処理。extra で keepLabel 等を上書き可。
+  const openWith = (extra = {}) => openPokePicker({
+    role, current: value, chainNext: opts.chainNext,
+    onPick: (p, info) => setValue(p.name, true, info.preset), ...extra,
+  });
+  const btn = el("button", { type: "button", class: "poke-trigger", id, onclick: () => openWith() },
     [spriteWrap, nameEl, el("span", { class: "trigger-caret" }, "▼")]);
+  btn.openPicker = openWith; // 連鎖からプログラム起動する用
 
   function paint() {
     const p = store.pokemonByName.get(value);
@@ -333,7 +344,7 @@ function openItemPicker(opts) {
   const listEl = el("div", { class: "picker-list" });
   const all = roleItems(opts.side);
 
-  function pick(name) { opts.onPick(name); close(); }
+  function pick(name) { opts.onPick(name); close(); if (opts.chainNext) opts.chainNext(); }
   function rowFor(it) {
     const r = it ? itemRole(it) : null;
     const name = it ? it.nameJp : "- - - - なし - - - -";
@@ -347,7 +358,20 @@ function openItemPicker(opts) {
     const items = all.filter((it) => !q || normJa(it.nameJp).includes(normJa(q)) || normJa(it.name).includes(normJa(q)));
     const kids = [];
     if (!q) kids.push(rowFor(null)); // 先頭に「なし」
-    kids.push(...items.map(rowFor));
+    if (q) {
+      kids.push(...items.map(rowFor)); // 検索中はフラット表示
+    } else {
+      // カテゴリ別の見出しでグループ表示（タイプ強化系がひとまとまりになる）
+      const order = ITEM_GROUP_ORDER[opts.side] || ["その他"];
+      const buckets = new Map(order.map((g) => [g, []]));
+      for (const it of items) (buckets.get(itemGroup(it, opts.side)) || buckets.get("その他")).push(it);
+      for (const g of order) {
+        const arr = buckets.get(g);
+        if (!arr || !arr.length) continue;
+        kids.push(el("div", { class: "picker-sec" }, g));
+        kids.push(...arr.map(rowFor));
+      }
+    }
     // 絞り込み前で候補が「なし」しか無い＝この構成で計算に効く合法道具が無い旨を明示（空っぽに見えない）
     if (!q && all.length === 0) {
       kids.push(el("p", { class: "hint" }, opts.side === "def"
@@ -701,9 +725,16 @@ function damageTab(preset) {
       chainNext: () => openAtkItemStep() });
   }
   function openAtkItemStep() {
-    if (atkItemSel.disabled) return; // メガストーン固定時はスキップ
+    // 攻撃側入力の最後（道具）。完了後は受け側の入力モーダルへ続けて進む。
+    const proceed = () => openDefStep();
+    if (atkItemSel.disabled) { proceed(); return; } // メガストーン固定時は道具をスキップして受けへ
     openItemPicker({ side: "atk", current: atkItemSel.value,
-      onPick: (name) => { atkItemSel.value = name; atkItemSel.dispatchEvent(new Event("change")); } });
+      onPick: (name) => { atkItemSel.value = name; atkItemSel.dispatchEvent(new Event("change")); },
+      chainNext: proceed });
+  }
+  // 受け側ポケモンの入力モーダルを開く。既に受けが設定済みなら「変更しない」を用意。
+  function openDefStep() {
+    defSel.openPicker({ keepLabel: defender ? `${defender.nameJp} のまま（変更しない）` : null });
   }
   // クイック努力値プリセット（選択モーダルのボタン）を攻撃側ステッパーに反映。
   function applyAtkPreset(preset) {
