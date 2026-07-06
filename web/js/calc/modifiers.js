@@ -88,6 +88,11 @@ const ABILITY_FX = {
   "Swarm": { atk: (c) => (c.moveType === "Bug" ? { dmg: 1.5 } : {}) },
   // サンパワー（はれ下で特攻1.5）— 天候はctxに無いため発動状態として適用
   "Solar Power": { atk: (c) => (!c.physical ? { atkStat: 1.5 } : {}) },
+  // へんげんじざい/リベロ: 使う技のタイプに変化→常にタイプ一致(STAB 1.5)
+  "Protean": { atk: () => ({ stab: 1.5 }) },
+  "Libero": { atk: () => ({ stab: 1.5 }) },
+  // すなのちから: すなあらし中、じめん/いわ/はがね技 ×1.3
+  "Sand Force": { atk: (c) => (c.weather === "sand" && (c.moveType === "Ground" || c.moveType === "Rock" || c.moveType === "Steel") ? { dmg: 1.3 } : {}) },
 
   // --- 両側で効く特性 ---
   // みずのベール: 攻撃=水技2倍 / 防御=炎半減
@@ -158,14 +163,23 @@ const ABILITY_FX = {
   "Sap Sipper": { def: (c) => (c.moveType === "Grass" ? { immune: true } : {}) },       // そうしょく
   "Earth Eater": { def: (c) => (c.moveType === "Ground" ? { immune: true } : {}) },     //土を食らう
   "Well-Baked Body": { def: (c) => (c.moveType === "Fire" ? { immune: true } : {}) },   // よくやけるからだ
+  "Bulletproof": { def: (c) => (c.bullet ? { immune: true } : {}) },                    // ぼうだん: 弾(bullet)技を無効
 };
 
 // タイプ変化特性（-ate系）: 指定タイプ化＋×1.2。computeOne がわざタイプを変えるのに使う。
 // Normalize は全技をノーマル化、他は「ノーマル技」を各タイプへ変換。
 export const ATE_ABILITIES = {
   "Aerilate": "Flying", "Pixilate": "Fairy", "Refrigerate": "Ice",
-  "Galvanize": "Electric", "Normalize": "Normal",
+  "Galvanize": "Electric", "Normalize": "Normal", "Dragonize": "Dragon", // ドラゴンスキン
 };
+// 倍率テーブルに載らない「メタ特性」（相性・タイプ変化・ランク無視などで computeOne 側で処理）。
+// isAbilitySupported を true にして UI の「（計算未対応）」注記を外す。
+export const META_ABILITIES = new Set([
+  "Mold Breaker", "Teravolt", "Turboblaze", // かたやぶり系: 相手の特性を無視
+  "Unaware",   // てんねん: 相手のランク補正を無視
+  "Scrappy",   // きもったま: ゴーストへノーマル/かくとうが通る
+  "Liquid Voice", // うるおいボイス: 音技→みず
+]);
 export function ateConversion(abilityName, moveType) {
   if (abilityName === "Normalize") return { type: "Normal", boost: 1.2 };
   const t = ATE_ABILITIES[abilityName];
@@ -187,7 +201,11 @@ export function abilityMods(abilityName, side, ctx) {
   return fn(ctx) || {};
 }
 export function isAbilitySupported(abilityName) {
-  return !!ABILITY_FX[abilityName] || !!ATE_ABILITIES[abilityName];
+  return !!ABILITY_FX[abilityName] || !!ATE_ABILITIES[abilityName] || META_ABILITIES.has(abilityName);
+}
+// メタ特性の判定ヘルパ（computeOne から使用）。
+export function ignoresDefenderAbility(atkAbility) {
+  return atkAbility === "Mold Breaker" || atkAbility === "Teravolt" || atkAbility === "Turboblaze";
 }
 
 // ---- 持ち物（説明文ベースで自動判定 + 例外）----

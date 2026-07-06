@@ -7,6 +7,7 @@ import { computeDamage, typeEffectiveness, stabMultiplier, summarize } from "./c
 import {
   WEATHERS, TERRAINS, SCREENS, weatherDamageMult, weatherDefStatMult,
   terrainDamageMult, screenMult, abilityMods, itemMods, isAbilitySupported, itemRole, ateConversion,
+  ignoresDefenderAbility,
 } from "./calc/modifiers.js";
 import { loadFavorites, upsertFavorite, removeFavorite, genId, emptySpread, loadRecent, pushRecent, upsertRecentSnap, syncRecentSnapFront } from "./favorites.js";
 
@@ -646,9 +647,16 @@ function computeOne(attacker, defender, move, cond) {
   const defKey = physical ? "def" : "spd";
   // -ate特性（スカイスキン等）でわざタイプが変わるなら、相性/一致の前に反映。
   const ate = ateConversion(cond.atkAbility, move.type);
-  const moveType = ate ? ate.type : move.type;
+  let moveType = ate ? ate.type : move.type;
   const ateBoost = ate ? ate.boost : 1;
-  const eff = typeEffectiveness(moveType, defender.types, store.typechart.chart);
+  // うるおいボイス: 音(sound)技→みずタイプ（威力補正なし）
+  if (cond.atkAbility === "Liquid Voice" && move.flags && move.flags.sound) moveType = "Water";
+  let eff = typeEffectiveness(moveType, defender.types, store.typechart.chart);
+  // きもったま(Scrappy): ゴーストのノーマル/かくとう無効を貫通
+  if (eff === 0 && cond.atkAbility === "Scrappy" && (moveType === "Normal" || moveType === "Fighting") && defender.types.includes("Ghost")) {
+    const dt = defender.types.filter((t) => t !== "Ghost");
+    eff = typeEffectiveness(moveType, dt.length ? dt : ["Normal"], store.typechart.chart);
+  }
 
   let atkStat = calcStat(attacker.base[atkKey], cond.atkSP, atkKey, cond.atkNat);
   // 防御は B(防御)/D(特防) を分けて持てる。技の物理/特殊で当たる方を使う。
@@ -662,22 +670,28 @@ function computeOne(attacker, defender, move, cond) {
   const ctx = {
     physical, moveType, moveName: move.name, attackerName: attacker.name,
     typeEff: eff, defenderFullHp: cond.remainPct >= 100, basePower: move.power,
+    weather: cond.weather, // すなのちから等の天候依存特性用
     // わざフラグ（とくせい全網羅の判定材料）
-    contact: !!f.contact, punch: !!f.punch, bite: !!f.bite, pulse: !!f.pulse,
+    contact: !!f.contact, punch: !!f.punch, bite: !!f.bite, pulse: !!f.pulse, bullet: !!f.bullet,
     sound: !!f.sound, hasSecondary: !!move.hasSecondary, recoil: !!move.isRecoil, crit: !!cond.crit,
   };
   const aA = abilityMods(cond.atkAbility, "atk", ctx); // 攻撃欄＝攻撃用の効果のみ
-  const dA = abilityMods(cond.defAbility, "def", ctx); // 防御欄＝防御用の効果のみ
+  // かたやぶり系: 防御側特性を無視（マルチスケイル/ふゆう無効化等）
+  const dA = ignoresDefenderAbility(cond.atkAbility) ? {} : abilityMods(cond.defAbility, "def", ctx);
   const aI = itemMods(cond.atkItem, ctx);
   const dI = itemMods(cond.defItem, ctx);
 
+  // てんねん(Unaware): 相手のランク補正を無視（受けが持てば攻撃ランク無視／攻めが持てば防御ランク無視）
+  const atkRankUsed = cond.defAbility === "Unaware" ? 0 : cond.atkRank;
+  const defRankUsed = cond.atkAbility === "Unaware" ? 0 : cond.defRank;
+
   // ランク補正 → ステ倍率（道具/特性） → 天候の防御ステ
-  atkStat = Math.floor(atkStat * statStageMultiplier(cond.atkRank));
+  atkStat = Math.floor(atkStat * statStageMultiplier(atkRankUsed));
   const atkStatMult = (aA.atkStat || 1) * (aI.atkStat || 1);
   if (atkStatMult !== 1) atkStat = Math.floor(atkStat * atkStatMult);
 
   atkStat = Math.max(1, atkStat);
-  defStat = Math.floor(defStat * statStageMultiplier(cond.defRank));
+  defStat = Math.floor(defStat * statStageMultiplier(defRankUsed));
   const wds = weatherDefStatMult(cond.weather, defender.types);
   const defStatMult = (dA.defStat || 1) * (dI.defStat || 1) * (physical ? wds.def : wds.spd);
   if (defStatMult !== 1) defStat = Math.floor(defStat * defStatMult);

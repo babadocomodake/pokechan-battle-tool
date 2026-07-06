@@ -8,7 +8,7 @@ import { calcStat } from "./stats.js";
 import { statStageMultiplier, stageMultiplier } from "./stages.js";
 import {
   weatherDamageMult, weatherDefStatMult, terrainDamageMult, screenMult,
-  abilityMods, itemMods,
+  abilityMods, itemMods, isAbilitySupported, ateConversion, ignoresDefenderAbility,
 } from "./modifiers.js";
 import { computeDamage, summarize } from "./damage.js";
 
@@ -133,6 +133,29 @@ test("summarize: 割合・確定数", () => {
   const s2 = summarize(r.rolls, 40); // 最小45で確定1発
   assert.equal(s2.guaranteed, 1);
   assert.equal(s2.label, "確定1発");
+});
+
+test("②-A 追加特性: 倍率・タイプ変化・メタ判定", () => {
+  // へんげんじざい/リベロ: 常にSTAB1.5
+  assert.deepEqual(abilityMods("Protean", "atk", {}), { stab: 1.5 });
+  assert.deepEqual(abilityMods("Libero", "atk", {}), { stab: 1.5 });
+  // すなのちから: すなあらし中の地/岩/鋼 ×1.3、他天候では無効
+  assert.deepEqual(abilityMods("Sand Force", "atk", { weather: "sand", moveType: "Ground" }), { dmg: 1.3 });
+  assert.deepEqual(abilityMods("Sand Force", "atk", { weather: "", moveType: "Ground" }), {});
+  assert.deepEqual(abilityMods("Sand Force", "atk", { weather: "sand", moveType: "Water" }), {});
+  // ぼうだん: 弾技を無効
+  assert.deepEqual(abilityMods("Bulletproof", "def", { bullet: true }), { immune: true });
+  assert.deepEqual(abilityMods("Bulletproof", "def", { bullet: false }), {});
+  // ドラゴンスキン: ノーマル技→ドラゴン ×1.2（-ate）
+  assert.deepEqual(ateConversion("Dragonize", "Normal"), { type: "Dragon", boost: 1.2 });
+  assert.equal(ateConversion("Dragonize", "Fire"), null);
+  // メタ特性はサポート扱い＆かたやぶり判定
+  for (const a of ["Mold Breaker", "Unaware", "Scrappy", "Liquid Voice", "Protean", "Dragonize"]) {
+    assert.ok(isAbilitySupported(a), `${a} should be supported`);
+  }
+  assert.equal(ignoresDefenderAbility("Mold Breaker"), true);
+  assert.equal(ignoresDefenderAbility("Teravolt"), true);
+  assert.equal(ignoresDefenderAbility("Guts"), false);
 });
 
 // 乱数の [min, max] を取り出す小ヘルパ
