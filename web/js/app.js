@@ -640,6 +640,41 @@ function fieldSelect(list, onChange) {
   return el("select", { onchange: onChange }, list.map((o) => el("option", { value: o.id }, o.label)));
 }
 
+// ===== ②-C 可変威力わざ =====
+// データに体重/素早さが無いため、それ依存の技は手動威力入力にフォールバックする。
+const HP_LOWER_MOVES = new Set(["Reversal", "Flail"]);          // 残HPが低いほど高威力
+const HP_HIGHER_MOVES = new Set(["Eruption", "Water Spout"]);   // 残HPが高いほど高威力(150基準)
+const FAINTED_MOVES = new Set(["Last Respects"]);              // 倒れた味方の数×50+50
+const DOUBLE_IF_HIT_MOVES = new Set(["Revenge", "Avalanche"]); // 先に殴られたら2倍
+const DOUBLE_IF_AFTER_MOVES = new Set(["Payback"]);            // 後攻で2倍
+const WEATHER_BALL_TYPE = { sun: "Fire", rain: "Water", sand: "Rock", snow: "Ice" };
+const NEEDS_MANUAL_POWER = new Set(["Low Kick", "Grass Knot", "Heavy Slam", "Heat Crash", "Gyro Ball", "Electro Ball"]); // 体重/素早さ依存(データ無し)
+// これらは「わざ横の条件入力/自動反映」で威力が変わる。UIの条件表示にも使う。
+function moveNeedsCondition(name) {
+  return HP_LOWER_MOVES.has(name) || HP_HIGHER_MOVES.has(name) || FAINTED_MOVES.has(name)
+    || DOUBLE_IF_HIT_MOVES.has(name) || DOUBLE_IF_AFTER_MOVES.has(name) || NEEDS_MANUAL_POWER.has(name);
+}
+// きしかいせい/じたばた: 残HP割合(%)→威力
+function reversalPower(pct) {
+  const x = Math.floor(48 * Math.min(100, Math.max(1, pct)) / 100);
+  if (x <= 1) return 200; if (x <= 4) return 150; if (x <= 9) return 100;
+  if (x <= 16) return 80; if (x <= 32) return 40; return 20;
+}
+// わざの実効威力（条件込み）。該当しなければ move.power。
+function effectivePower(move, cond) {
+  const name = move.name;
+  if (NEEDS_MANUAL_POWER.has(name)) return cond.manualPower != null ? cond.manualPower : (move.power || 0);
+  if (HP_LOWER_MOVES.has(name)) return reversalPower(cond.atkHpPct ?? 100);
+  if (HP_HIGHER_MOVES.has(name)) return Math.max(1, Math.floor(150 * (cond.atkHpPct ?? 100) / 100));
+  if (FAINTED_MOVES.has(name)) return 50 * (1 + Math.min(5, Math.max(0, cond.faintedAllies || 0)));
+  let p = move.power || 0;
+  if (name === "Acrobatics" && !cond.atkItem) p *= 2;              // 持ち物なしで2倍
+  if (name === "Weather Ball" && cond.weather) p *= 2;            // 天候中2倍
+  if (name === "Facade" && cond.burn) p *= 2;                     // 自分がやけど等で2倍
+  if ((DOUBLE_IF_HIT_MOVES.has(name) || DOUBLE_IF_AFTER_MOVES.has(name)) && cond.turnDouble) p *= 2;
+  return p;
+}
+
 // 1技分のダメージ計算（全条件込み）。cond はUIから集めた条件。
 function computeOne(attacker, defender, move, cond) {
   const physical = move.category === "Physical";
@@ -651,6 +686,8 @@ function computeOne(attacker, defender, move, cond) {
   const ateBoost = ate ? ate.boost : 1;
   // うるおいボイス: 音(sound)技→みずタイプ（威力補正なし）
   if (cond.atkAbility === "Liquid Voice" && move.flags && move.flags.sound) moveType = "Water";
+  // ウェザーボール: 天候でタイプが変わる
+  if (move.name === "Weather Ball" && cond.weather && WEATHER_BALL_TYPE[cond.weather]) moveType = WEATHER_BALL_TYPE[cond.weather];
   let eff = typeEffectiveness(moveType, defender.types, store.typechart.chart);
   // きもったま(Scrappy): ゴーストのノーマル/かくとう無効を貫通
   if (eff === 0 && cond.atkAbility === "Scrappy" && (moveType === "Normal" || moveType === "Fighting") && defender.types.includes("Ghost")) {
@@ -666,10 +703,11 @@ function computeOne(attacker, defender, move, cond) {
   let defStat = calcStat(defender.base[defKey], defInvest, defKey, defNat);
   const maxHp = calcStat(defender.base.hp, cond.defHpSP, "hp", 1.0);
 
+  const power = effectivePower(move, cond); // 可変威力技の実効威力
   const f = move.flags || {};
   const ctx = {
     physical, moveType, moveName: move.name, attackerName: attacker.name,
-    typeEff: eff, defenderFullHp: cond.remainPct >= 100, basePower: move.power,
+    typeEff: eff, defenderFullHp: cond.remainPct >= 100, basePower: power,
     weather: cond.weather, // すなのちから等の天候依存特性用
     // わざフラグ（とくせい全網羅の判定材料）
     contact: !!f.contact, punch: !!f.punch, bite: !!f.bite, pulse: !!f.pulse, bullet: !!f.bullet,
@@ -706,9 +744,10 @@ function computeOne(attacker, defender, move, cond) {
     ateBoost,
     aA.dmg || 1, dA.dmg || 1, aI.dmg || 1, dI.dmg || 1,
   ];
-  const burn = physical && cond.burn;
+  // からげんき(Facade)はやけどの攻撃低下(×0.5)を無視する
+  const burn = physical && cond.burn && move.name !== "Facade";
   const { rolls } = computeDamage({
-    power: move.power, atkStat, defStat, stab, typeEff: eff,
+    power, atkStat, defStat, stab, typeEff: eff,
     crit: cond.crit, burn, immune, weatherMult, chainMults,
   });
   const currentHp = Math.max(1, Math.floor(maxHp * Math.min(100, Math.max(0, cond.remainPct)) / 100));
@@ -757,10 +796,32 @@ function damageTab(preset) {
     else if (preset === "atkMax") { atkSP.value = String(SP_MAX_PER_STAT); atkNature.set("neutral"); }
     else if (preset === "atkMaxBoost") { atkSP.value = String(SP_MAX_PER_STAT); atkNature.set("up"); }
   }
-  const moveSel = el("select", { class: "move-select", onchange: render });
+  const moveSel = el("select", { class: "move-select", onchange: () => { renderMoveCond(); render(); } });
   // #2 わざ検索（かな/英/部分一致でわざ欄を絞り込み）
   const moveSearch = el("input", { type: "search", class: "search move-search", placeholder: "🔍 わざ名で絞り込み（かな/英）",
     oninput: () => refreshMoves(moveSearch.value) });
+
+  // ②-C 可変威力わざの「わざ横」条件入力。選んだ技に応じて必要な入力だけ表示する。
+  const atkHpPctInput = el("input", { type: "number", min: "1", max: "100", value: "100", class: "sp-input", oninput: render });
+  const faintedInput = el("input", { type: "number", min: "0", max: "5", value: "0", class: "sp-input", oninput: render });
+  const manualPowerInput = el("input", { type: "number", min: "0", max: "250", value: "", placeholder: "威力", class: "sp-input", oninput: render });
+  const turnDoubleCb = el("input", { type: "checkbox", onchange: render });
+  const moveCondWrap = el("div", { class: "move-cond" });
+  function renderMoveCond() {
+    const name = moveSel.value;
+    const rows = [];
+    const fieldRow = (label, node) => el("div", { class: "field" }, [el("label", {}, label), node]);
+    if (HP_LOWER_MOVES.has(name) || HP_HIGHER_MOVES.has(name)) rows.push(fieldRow("自分の残りHP%（この技の威力に反映）", atkHpPctInput));
+    if (FAINTED_MOVES.has(name)) rows.push(fieldRow("倒れた味方の数（0〜5）", faintedInput));
+    if (DOUBLE_IF_HIT_MOVES.has(name)) rows.push(el("label", { class: "toggle" }, [turnDoubleCb, " 先に相手から殴られた（威力2倍）"]));
+    if (DOUBLE_IF_AFTER_MOVES.has(name)) rows.push(el("label", { class: "toggle" }, [turnDoubleCb, " 後攻で撃つ（威力2倍）"]));
+    if (NEEDS_MANUAL_POWER.has(name)) rows.push(fieldRow("威力を手動入力（体重/素早さ依存のため）", manualPowerInput));
+    // 自動反映系はヒントだけ表示（入力不要）
+    if (name === "Acrobatics") rows.push(el("p", { class: "hint" }, "自動: 持ち物なしで威力2倍"));
+    if (name === "Weather Ball") rows.push(el("p", { class: "hint" }, "自動: 天候でタイプ変化＋威力2倍"));
+    if (name === "Facade") rows.push(el("p", { class: "hint" }, "自動: やけど等の状態異常で威力2倍（下のやけどトグル連動）"));
+    moveCondWrap.replaceChildren(...rows);
+  }
   const atkSP = spInput(SP_MAX_PER_STAT, "atk-sp");
   const atkNature = natureTriToggle("up");
   const atkRankSel = rankSelect(render);
@@ -1100,6 +1161,11 @@ function damageTab(preset) {
       weather: weatherSel.value, terrain: terrainSel.value, screen: screenSel.value,
       burn: cbBurn.checked,
       remainPct: Math.min(100, Math.max(0, parseInt(remainHp.value || "100", 10) || 0)),
+      // ②-C 可変威力わざの条件
+      atkHpPct: Math.min(100, Math.max(1, parseInt(atkHpPctInput.value || "100", 10) || 100)),
+      faintedAllies: Math.min(5, Math.max(0, parseInt(faintedInput.value || "0", 10) || 0)),
+      manualPower: manualPowerInput.value === "" ? null : Math.max(0, parseInt(manualPowerInput.value, 10) || 0),
+      turnDouble: turnDoubleCb.checked,
     };
   }
   function effLabelOf(eff, immune) {
@@ -1109,6 +1175,7 @@ function damageTab(preset) {
 
   function render() {
     paintFieldTriggers(); // 技/道具トリガーの表示名を最新化
+    renderMoveCond();     // 可変威力わざの条件入力を選択技に合わせて表示
     // 防御履歴の先頭が現在の防御ポケモンなら、編集中の設定を逐次反映（実際に使った状態を保存）。
     // 内容が変わった時だけチップを再描画して、表示と復元データを最新に保つ。
     if (syncRecentSnapFront(RECENT_DEF_KEY, defSnapshot())) renderRecents();
@@ -1263,6 +1330,7 @@ function damageTab(preset) {
       el("div", { class: "fav-row2" }, [labeled("お気に入りから", atkFavSel), labeled("ランキングから", atkRankPickSel)]),
       el("div", { class: "field" }, [el("label", {}, "最近使った攻撃"), atkRecents]),
       el("div", { class: "field" }, [el("label", {}, "わざ"), moveTrig, hiddenNative([moveSearch, moveSel])]),
+      moveCondWrap,
       el("div", { class: "fav-actions" }, [atkSaveBtn]),
     ]),
     el("section", { class: "card" }, [
