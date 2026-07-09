@@ -158,5 +158,24 @@ test("②-A 追加特性: 倍率・タイプ変化・メタ判定", () => {
   assert.equal(ignoresDefenderAbility("Guts"), false);
 });
 
+test("②-A2 条件付き特性: アナライズ/きれあじ/とうそうしん/そうだいしょう", () => {
+  // アナライズ: 後攻で ×1.3
+  assert.deepEqual(abilityMods("Analytic", "atk", { movedAfter: true }), { dmg: 1.3 });
+  assert.deepEqual(abilityMods("Analytic", "atk", { movedAfter: false }), {});
+  // きれあじ: 切断技で ×1.5
+  assert.deepEqual(abilityMods("Sharpness", "atk", { slicing: true }), { dmg: 1.5 });
+  assert.deepEqual(abilityMods("Sharpness", "atk", { slicing: false }), {});
+  // とうそうしん: 同性×1.25 / 異性×0.75 / 未指定なし
+  assert.deepEqual(abilityMods("Rivalry", "atk", { rivalry: "same" }), { dmg: 1.25 });
+  assert.deepEqual(abilityMods("Rivalry", "atk", { rivalry: "opp" }), { dmg: 0.75 });
+  assert.deepEqual(abilityMods("Rivalry", "atk", { rivalry: "" }), {});
+  // そうだいしょう: 倒れた味方数×0.1加算（最大5）
+  assert.deepEqual(abilityMods("Supreme Overlord", "atk", { faintedAllies: 0 }), {});
+  assert.deepEqual(abilityMods("Supreme Overlord", "atk", { faintedAllies: 3 }), { dmg: 1.3 });
+  assert.deepEqual(abilityMods("Supreme Overlord", "atk", { faintedAllies: 9 }), { dmg: 1.5 });
+  // すべてサポート扱い
+  for (const a of ["Analytic", "Sharpness", "Rivalry", "Supreme Overlord"]) assert.ok(isAbilitySupported(a));
+});
+
 // 乱数の [min, max] を取り出す小ヘルパ
 function pick(r) { return [r.min, r.max]; }

@@ -93,6 +93,11 @@ const ABILITY_FX = {
   "Libero": { atk: () => ({ stab: 1.5 }) },
   // すなのちから: すなあらし中、じめん/いわ/はがね技 ×1.3
   "Sand Force": { atk: (c) => (c.weather === "sand" && (c.moveType === "Ground" || c.moveType === "Rock" || c.moveType === "Steel") ? { dmg: 1.3 } : {}) },
+  // === ②-A2 条件付き特性（ctxの条件で発動）===
+  "Analytic": { atk: (c) => (c.movedAfter ? { dmg: 1.3 } : {}) },          // アナライズ: 後攻で ×1.3
+  "Sharpness": { atk: (c) => (c.slicing ? { dmg: 1.5 } : {}) },            // きれあじ: 切断技 ×1.5
+  "Rivalry": { atk: (c) => (c.rivalry === "same" ? { dmg: 1.25 } : c.rivalry === "opp" ? { dmg: 0.75 } : {}) }, // とうそうしん: 同性×1.25/異性×0.75
+  "Supreme Overlord": { atk: (c) => (c.faintedAllies ? { dmg: 1 + 0.1 * Math.min(5, c.faintedAllies) } : {}) }, // そうだいしょう: 倒れた味方数×0.1加算
 
   // --- 両側で効く特性 ---
   // みずのベール: 攻撃=水技2倍 / 防御=炎半減
