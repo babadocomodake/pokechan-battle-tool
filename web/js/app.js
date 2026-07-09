@@ -719,6 +719,7 @@ function computeOne(attacker, defender, move, cond) {
     // ②-A2 条件付き特性の判定材料
     movedAfter: !!cond.movedAfter, rivalry: cond.rivalry || "", faintedAllies: cond.faintedAllies || 0,
     slicing: SLICING_MOVES.has(move.name),
+    disguiseIntact: !!cond.disguiseIntact, // ばけのかわ（受け側）: 皮ありで1発無効
     // わざフラグ（とくせい全網羅の判定材料）
     contact: !!f.contact, punch: !!f.punch, bite: !!f.bite, pulse: !!f.pulse, bullet: !!f.bullet,
     sound: !!f.sound, hasSecondary: !!move.hasSecondary, recoil: !!move.isRecoil, crit: !!cond.crit,
@@ -817,6 +818,8 @@ function damageTab(preset) {
   const manualPowerInput = el("input", { type: "number", min: "0", max: "250", value: "", placeholder: "威力", class: "sp-input", oninput: render });
   // 後攻トグルは「可変威力技(しっぺがえし等)」と「アナライズ」で共用（どちらも“後攻”という同じ条件）
   const afterCb = el("input", { type: "checkbox", onchange: render });
+  // ばけのかわ(ミミッキュ): 皮が残っていれば1発無効。初期ONで「皮あり」を既定に。
+  const disguiseCb = el("input", { type: "checkbox", checked: true, onchange: render });
   const rivalrySel = el("select", { class: "abil-select", onchange: render }, [
     el("option", { value: "" }, "相手との性別（とうそうしん）"),
     el("option", { value: "same" }, "同性（×1.25）"),
@@ -842,6 +845,11 @@ function damageTab(preset) {
     if (mv === "Weather Ball") rows.push(el("p", { class: "hint" }, "自動: 天候でタイプ変化＋威力2倍"));
     if (mv === "Facade") rows.push(el("p", { class: "hint" }, "自動: やけど等の状態異常で威力2倍（下のやけどトグル連動）"));
     if (ab === "Sharpness") rows.push(el("p", { class: "hint" }, SLICING_MOVES.has(mv) ? "自動: 切断技なので ×1.5" : "きれあじ: 切断技のとき ×1.5（この技は対象外）"));
+    if (ab === "Parental Bond") rows.push(el("p", { class: "hint" }, "自動: おやこあい＝2回攻撃の合計 約×1.25（親1.0＋子0.25）"));
+    // ばけのかわ（受け側の特性）: 皮の有無で1発無効を切替。
+    if (defAbilSel.value === "Disguise") {
+      rows.push(el("label", { class: "toggle" }, [disguiseCb, " 化けの皮あり＝この技は0ダメージ（実戦では別途HP1/8削れ）"]));
+    }
     moveCondWrap.replaceChildren(...rows);
   }
   const atkSP = spInput(SP_MAX_PER_STAT, "atk-sp");
@@ -1189,6 +1197,7 @@ function damageTab(preset) {
       manualPower: manualPowerInput.value === "" ? null : Math.max(0, parseInt(manualPowerInput.value, 10) || 0),
       movedAfter: afterCb.checked,     // 後攻（しっぺがえし/リベンジ/アナライズ 共通）
       rivalry: rivalrySel.value,       // とうそうしんの性別関係
+      disguiseIntact: disguiseCb.checked, // ばけのかわ（受け側）: 皮あり=1発無効
     };
   }
   function effLabelOf(eff, immune) {

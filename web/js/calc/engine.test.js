@@ -177,5 +177,15 @@ test("②-A2 条件付き特性: アナライズ/きれあじ/とうそうしん
   for (const a of ["Analytic", "Sharpness", "Rivalry", "Supreme Overlord"]) assert.ok(isAbilitySupported(a));
 });
 
+test("②-P1/P2 現シーズン特性: ばけのかわ/おやこあい/バトルスイッチ", () => {
+  // ばけのかわ: 皮ありで1発無効 / 皮なしは通常ダメージ
+  assert.deepEqual(abilityMods("Disguise", "def", { disguiseIntact: true }), { immune: true });
+  assert.deepEqual(abilityMods("Disguise", "def", { disguiseIntact: false }), {});
+  // おやこあい(メガガルーラ): 2回攻撃の合計 ×1.25（常時）
+  assert.deepEqual(abilityMods("Parental Bond", "atk", {}), { dmg: 1.25 });
+  // バトルスイッチ/ばけのかわ/おやこあいはサポート扱い（「計算未対応」注記を外す）
+  for (const a of ["Disguise", "Parental Bond", "Stance Change"]) assert.ok(isAbilitySupported(a));
+});
+
 // 乱数の [min, max] を取り出す小ヘルパ
 function pick(r) { return [r.min, r.max]; }

@@ -98,6 +98,8 @@ const ABILITY_FX = {
   "Sharpness": { atk: (c) => (c.slicing ? { dmg: 1.5 } : {}) },            // きれあじ: 切断技 ×1.5
   "Rivalry": { atk: (c) => (c.rivalry === "same" ? { dmg: 1.25 } : c.rivalry === "opp" ? { dmg: 0.75 } : {}) }, // とうそうしん: 同性×1.25/異性×0.75
   "Supreme Overlord": { atk: (c) => (c.faintedAllies ? { dmg: 1 + 0.1 * Math.min(5, c.faintedAllies) } : {}) }, // そうだいしょう: 倒れた味方数×0.1加算
+  // おやこあい(メガガルーラ): 2回攻撃の合計 ≈ ×1.25（親1.0＋子0.25）。単発技前提の近似。
+  "Parental Bond": { atk: () => ({ dmg: 1.25 }) },
 
   // --- 両側で効く特性 ---
   // みずのベール: 攻撃=水技2倍 / 防御=炎半減
@@ -122,6 +124,8 @@ const ABILITY_FX = {
   "Ice Scales": { def: (c) => (!c.physical ? { dmg: 0.5 } : {}) },
   "Purifying Salt": { def: (c) => (c.moveType === "Ghost" ? { dmg: 0.5 } : {}) },
   "Levitate": { def: (c) => (c.moveType === "Ground" ? { immune: true } : {}) },
+  // ばけのかわ(ミミッキュ): 皮が残っていれば1発無効（実戦では別途HP1/8削れ）
+  "Disguise": { def: (c) => (c.disguiseIntact ? { immune: true } : {}) },
 
   // === 追加（M-B全網羅）: わざフラグ依存の攻撃特性 ===========================
   "Iron Fist": { atk: (c) => (c.punch ? { dmg: 1.2 } : {}) },          // てつのこぶし: パンチ技 ×1.2
@@ -184,6 +188,7 @@ export const META_ABILITIES = new Set([
   "Unaware",   // てんねん: 相手のランク補正を無視
   "Scrappy",   // きもったま: ゴーストへノーマル/かくとうが通る
   "Liquid Voice", // うるおいボイス: 音技→みず
+  "Stance Change", // バトルスイッチ(ギルガルド): フォルム選択で対応（ブレード=攻撃形態を別エントリ化）
 ]);
 export function ateConversion(abilityName, moveType) {
   if (abilityName === "Normalize") return { type: "Normal", boost: 1.2 };
