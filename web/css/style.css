@@ -716,3 +716,28 @@ input, select, textarea,
 
 /* 計算用に残すネイティブ<select>を隠す（値の保持・連鎖入力には使う） */
 .hidden-native { display: none !important; }
+
+/* ===== 逆算タブ: モード切替（型読み / 耐え調整） ===== */
+.seg-mode { display: inline-flex; gap: 0; margin-bottom: 10px; border-radius: var(--radius); overflow: hidden; box-shadow: var(--frame); }
+.seg-btn { background: var(--surface-2); color: var(--dim); border: 0; padding: 9px 16px; font-family: inherit; font-size: .86rem; font-weight: 700; cursor: pointer; }
+.seg-btn + .seg-btn { border-left: 2px solid var(--bg); }
+.seg-btn[aria-pressed="true"] { background: var(--accent-2); color: #fff; box-shadow: inset 2px 2px 0 0 rgba(255,255,255,.25); }
+
+/* 与えたダメージ%・許容誤差の数値入力 */
+.obs-input { width: 100%; background: var(--surface-2); color: var(--text); border: 0; border-radius: var(--radius); padding: 9px 10px; font-family: inherit; }
+
+/* 型読みの結果カード */
+.scout-card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--frame); padding: 12px 14px; margin-top: 12px; }
+.scout-card h4 { margin: 0 0 6px; font-size: .95rem; color: var(--accent); }
+.scout-lead { margin: 4px 0 8px; font-size: .9rem; line-height: 1.5; }
+
+/* 推定配分バンド表（HP-SP ↔ 防御-SP のトレードオフ） */
+.scout-band-wrap { overflow-x: auto; margin-top: 8px; }
+.scout-band { border-collapse: collapse; font-size: .85rem; min-width: 180px; }
+.scout-band th, .scout-band td { padding: 5px 12px; border-bottom: 2px solid var(--bg); text-align: left; white-space: nowrap; }
+.scout-band th { color: var(--dim); font-size: .78rem; }
+.scout-band tbody tr:nth-child(odd) td { background: rgba(95,120,184,.10); }
+
+/* よく使う技チップ */
+.scout-moves { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.scout-move-chip { background: var(--surface-2); color: var(--text); border-radius: var(--radius); padding: 4px 9px; font-size: .8rem; }

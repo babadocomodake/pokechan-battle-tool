@@ -10,7 +10,7 @@ import {
   weatherDamageMult, weatherDefStatMult, terrainDamageMult, screenMult,
   abilityMods, itemMods, isAbilitySupported, ateConversion, ignoresDefenderAbility,
 } from "./modifiers.js";
-import { computeDamage, summarize } from "./damage.js";
+import { computeDamage, summarize, observedMatches, observedSide, scoutBand } from "./damage.js";
 
 test("calcStat: 実数値（Lv50/IV31/SP制）", () => {
   assert.equal(calcStat(100, 0, "hp"), 175);            // HP = core+60
@@ -185,6 +185,36 @@ test("②-P1/P2 現シーズン特性: ばけのかわ/おやこあい/バトル
   assert.deepEqual(abilityMods("Parental Bond", "atk", {}), { dmg: 1.25 });
   // バトルスイッチ/ばけのかわ/おやこあいはサポート扱い（「計算未対応」注記を外す）
   for (const a of ["Disguise", "Parental Bond", "Stance Change"]) assert.ok(isAbilitySupported(a));
+});
+
+test("逆算: observedMatches / observedSide（許容込みのレンジ判定）", () => {
+  // レンジ 30〜36% に対し、許容±1%
+  assert.equal(observedMatches(30, 36, 33, 1), true);   // 内側
+  assert.equal(observedMatches(30, 36, 29.5, 1), true); // 下端-許容内
+  assert.equal(observedMatches(30, 36, 28.9, 1), false);// 下に外れ
+  assert.equal(observedMatches(30, 36, 37, 1), true);   // 上端+許容の境界=内側
+  assert.equal(observedMatches(30, 36, 37.1, 1), false);// 上に外れ
+  assert.equal(observedSide(30, 36, 28, 1), "below");   // 相手はもっと硬い
+  assert.equal(observedSide(30, 36, 40, 1), "above");   // 相手はもっと柔らかい
+  assert.equal(observedSide(30, 36, 33, 1), "in");
+});
+
+test("逆算: scoutBand（整合配分をHPごとの防御SP範囲へ畳む）", () => {
+  const combos = [
+    { hpSP: 0, defSP: 20 }, { hpSP: 0, defSP: 28 },
+    { hpSP: 4, defSP: 16 }, { hpSP: 4, defSP: 24 },
+    { hpSP: 8, defSP: 12 },
+  ];
+  const b = scoutBand(combos);
+  assert.equal(b.count, 5);
+  assert.equal(b.hpMin, 0); assert.equal(b.hpMax, 8);
+  assert.equal(b.defMin, 12); assert.equal(b.defMax, 28);
+  assert.equal(b.totalMin, 20); assert.equal(b.totalMax, 28);
+  assert.deepEqual(b.rows[0], { hp: 0, defMin: 20, defMax: 28 });
+  assert.deepEqual(b.rows[1], { hp: 4, defMin: 16, defMax: 24 });
+  assert.deepEqual(b.rows[2], { hp: 8, defMin: 12, defMax: 12 });
+  // 空でも壊れない
+  assert.equal(scoutBand([]).count, 0);
 });
 
 // 乱数の [min, max] を取り出す小ヘルパ

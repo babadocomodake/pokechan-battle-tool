@@ -3,7 +3,7 @@ import { loadData, store, getNature, attackingMovesFor, allMovesFor, byUsage } f
 import { calcStat, calcAllStats, STAT_KEYS, STAT_LABELS_JP, SP_MAX_PER_STAT, SP_TOTAL } from "./calc/stats.js";
 import { buildSpeedTable, speedPresets, applySpeedMods } from "./calc/speed.js";
 import { statStageMultiplier } from "./calc/stages.js";
-import { computeDamage, typeEffectiveness, stabMultiplier, summarize } from "./calc/damage.js";
+import { computeDamage, typeEffectiveness, stabMultiplier, summarize, observedMatches, scoutBand } from "./calc/damage.js";
 import {
   WEATHERS, TERRAINS, SCREENS, weatherDamageMult, weatherDefStatMult,
   terrainDamageMult, screenMult, abilityMods, itemMods, isAbilitySupported, itemRole, ateConversion,
@@ -1559,13 +1559,286 @@ function speedCompareModal(atk, def) {
   return overlay;
 }
 
-// =================== タブ: 逆算（耐久調整 R1） ===================
+// メガ枠のポケモンは道具をメガストーン固定にする（両モード共用）。
+function lockMegaItem(itemSel, p) {
+  if (p.form === "Mega" && p.megaStone) {
+    if (![...itemSel.options].some((o) => o.value === p.megaStone.name)) {
+      itemSel.appendChild(el("option", { value: p.megaStone.name }, p.megaStone.nameJp));
+    }
+    itemSel.value = p.megaStone.name; itemSel.disabled = true; itemSel.classList.add("locked");
+  } else {
+    itemSel.disabled = false; itemSel.classList.remove("locked");
+    if (itemSel.value && store.itemsByName.get(itemSel.value)?.category === "mega-stones") itemSel.value = "";
+  }
+}
+
+// =================== タブ: 逆算（モード切替: 型読み / 耐え調整） ===================
+// ・型読み  … 与えたダメージ% から相手の耐久SP配分を逆算し、型と対策を推定
+// ・耐え調整 … 相手の攻撃を確定1発耐えるのに必要な自分の耐久SPを逆算
 function reverseTab() {
   const root = el("div", { class: "tab-panel" });
+  const MODES = [
+    { key: "scout", label: "型読み", hint: "与えたダメージ% → 相手の耐久SP配分を逆算。型のヒントと対策も表示（対戦中の読み向け）。" },
+    { key: "survive", label: "耐え調整", hint: "相手の攻撃を「確定1発耐え」するのに必要な自分の耐久SPを逆算（構築・調整向け）。" },
+  ];
+  let cur = "scout";
+  const seg = el("div", { class: "seg-mode" });
+  const hintP = el("p", { class: "hint" });
+  const host = el("div");
+  const btns = MODES.map((m) => el("button", { type: "button", class: "seg-btn",
+    onclick: () => { cur = m.key; paint(); } }, m.label));
+  function paint() {
+    btns.forEach((b, i) => b.setAttribute("aria-pressed", MODES[i].key === cur ? "true" : "false"));
+    hintP.textContent = MODES.find((m) => m.key === cur).hint;
+    host.replaceChildren(cur === "scout" ? scoutMode() : surviveMode());
+  }
+  seg.append(...btns);
+  root.append(seg, hintP, host);
+  paint();
+  return root;
+}
+
+// ---- モード: 型読み（与ダメ% → 相手の耐久SP推定） ----
+function scoutMode() {
+  const root = el("div");
+  let attacker, defender;
+
+  // 攻撃側（自分＝殴った側。フル指定）
+  const atkSel = pokemonSelect((p) => { attacker = p; refreshMoves(); fillAbilitySelect(atkAbilSel, p); lockMegaItem(atkItemSel, p); render(); }, "sc-atk");
+  const moveSel = el("select", { class: "move-select", onchange: render });
+  const atkSP = spInput(SP_MAX_PER_STAT, "sc-atk-sp");
+  const atkNature = natureTriToggle("up");
+  const atkRankSel = rankSelect(render);
+  const atkAbilSel = el("select", { class: "abil-select", onchange: render });
+  const atkItemSel = realItemSelect("atk", render);
+
+  // 防御側（相手。SP・性格は逆算対象なので入力しない。特性/道具は分かれば指定）
+  const defSel = pokemonSelect((p) => { defender = p; fillAbilitySelect(defAbilSel, p); lockMegaItem(defItemSel, p); render(); }, "sc-def");
+  attacker = store.pokemonByName.get(atkSel.value);
+  defender = store.pokemonByName.get(defSel.value);
+  const defAbilSel = el("select", { class: "abil-select", onchange: render });
+  const defItemSel = realItemSelect("def", render);
+
+  // 場
+  const weatherSel = fieldSelect(WEATHERS, render);
+  const terrainSel = fieldSelect(TERRAINS, render);
+  const screenSel = fieldSelect(SCREENS, render);
+  const cbCrit = el("input", { type: "checkbox", onchange: render });
+  const cbBurn = el("input", { type: "checkbox", onchange: render });
+
+  // 観測: 与えたダメージ割合(%) と 許容誤差(±%)
+  const obsInput = el("input", { type: "number", class: "obs-input", min: "0", max: "100", step: "0.1", placeholder: "例 33.5" });
+  const tolInput = el("input", { type: "number", class: "obs-input", min: "0", max: "20", step: "0.5", value: "1" });
+  [atkSP, obsInput, tolInput].forEach((i) => i.addEventListener("input", render));
+  atkNature.addEventListener("trichange", render);
+
+  const result = el("div", { class: "dmg-result" });
+
+  function refreshMoves() {
+    const list = attackingMovesFor(attacker);
+    const order = store.typechart?.types || [];
+    const byType = new Map();
+    for (const m of list) { if (!byType.has(m.type)) byType.set(m.type, []); byType.get(m.type).push(m); }
+    const types = [...byType.keys()].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    moveSel.replaceChildren(...types.map((t) => {
+      const moves = byType.get(t).sort((a, b) => (b.power || 0) - (a.power || 0));
+      return el("optgroup", { label: TYPE_JP[t] || t }, moves.map((m) =>
+        el("option", { value: m.name }, `${m.nameJp || m.name}（${m.category === "Physical" ? "物理" : "特殊"}/威力${m.power}）`)));
+    }));
+  }
+
+  function baseCond() {
+    return {
+      atkSP: clampSPVal(atkSP.value), atkNat: atkNature.get(),
+      atkRank: parseInt(atkRankSel.value, 10) || 0, defRank: 0,
+      atkAbility: atkAbilSel.value, defAbility: defAbilSel.value,
+      atkItem: itemObj(atkItemSel.value), defItem: itemObj(defItemSel.value),
+      weather: weatherSel.value, terrain: terrainSel.value, screen: screenSel.value,
+      crit: cbCrit.checked, burn: cbBurn.checked, remainPct: 100,
+    };
+  }
+
+  // 指定の防御性格補正(1.1/1.0/0.9)で HP-SP×防御-SP を総当りし、観測%に合う配分を集める。
+  function searchNat(move, natVal, observed, tol) {
+    const out = []; let eff = 0;
+    for (let hp = 0; hp <= SP_MAX_PER_STAT; hp++) {
+      for (let dsp = 0; dsp <= SP_MAX_PER_STAT; dsp++) {
+        const r = computeOne(attacker, defender, move, { ...baseCond(), defHpSP: hp, defSP: dsp, defNat: natVal });
+        eff = r.eff;
+        if (observedMatches(r.summary.pctMin, r.summary.pctMax, observed, tol)) {
+          out.push({ hpSP: hp, defSP: dsp, guaranteed: r.summary.guaranteed });
+        }
+      }
+    }
+    return { out, eff };
+  }
+
+  function bulkVerdict(defStatJp, band) {
+    const { totalMin: tmin, totalMax: tmax } = band;
+    if (tmin >= 24) return `かなりの耐久型。最低でも HP+${defStatJp} に合計 ${tmin}SP 相当を投資している。`;
+    if (tmin >= 8) return `そこそこ耐久を意識した配分（合計 ${tmin}〜${tmax}SP 相当）。`;
+    if (tmax <= 8) return `ほぼ無振り耐久 → 火力/素早さ重視の型（アタッカー）の可能性が高い。`;
+    return `無振り〜中耐久の幅（合計 ${tmin}〜${tmax}SP 相当）。`;
+  }
+
+  function render() {
+    const move = store.movesByName.get(moveSel.value);
+    if (!move) { result.replaceChildren(el("p", { class: "hint" }, "技データがありません")); return; }
+    const observed = parseFloat(obsInput.value);
+    const tol = Math.max(0, parseFloat(tolInput.value) || 1);
+    if (!(observed > 0)) { result.replaceChildren(el("p", { class: "hint" }, "「与えたダメージ割合(%)」を入力すると、相手の耐久SPを逆算します。")); return; }
+
+    const physical = move.category === "Physical";
+    const defStatJp = physical ? "ぼうぎょ" : "とくぼう";
+
+    const neu = searchNat(move, 1.0, observed, tol);
+    if (neu.eff === 0) {
+      result.replaceChildren(el("div", { class: "dmg-ko ko" }, `${move.nameJp || move.name} は ${defender.nameJp} に効果がありません（無効）。逆算できません。`));
+      return;
+    }
+    const up = searchNat(move, 1.1, observed, tol);
+    const dn = searchNat(move, 0.9, observed, tol);
+    const all = [...up.out, ...neu.out, ...dn.out];
+
+    if (all.length === 0) {
+      // どの配分でも観測%を作れない → 上下どちらに外れたかで助言
+      const frail = computeOne(attacker, defender, move, { ...baseCond(), defHpSP: 0, defSP: 0, defNat: 0.9 });
+      const bulky = computeOne(attacker, defender, move, { ...baseCond(), defHpSP: SP_MAX_PER_STAT, defSP: SP_MAX_PER_STAT, defNat: 1.1 });
+      const msg = observed > frail.summary.pctMax
+        ? `観測 ${observed}% は、相手が無振りでも受けるダメージ（最大 ${frail.summary.pctMax.toFixed(1)}%）より大きいです。攻撃側の火力（威力/持ち物/特性/性格/ランク）の指定を見直すか、急所などを確認してください。`
+        : `観測 ${observed}% は、相手が耐久最大でも受けるダメージ（最小 ${bulky.summary.pctMin.toFixed(1)}%）より小さいです。相手は半減実・軽減特性・想定外の耐久など、SP以外の要因を持っている可能性があります。`;
+      result.replaceChildren(
+        el("div", { class: "dmg-ko ko" }, "SP配分だけでは観測ダメージを説明できません"),
+        el("p", { class: "hint" }, msg),
+      );
+      return;
+    }
+
+    // 代表バンド＝無補正があればそれ、無ければ性格補正側
+    const repOut = neu.out.length ? neu.out : (up.out.length ? up.out : dn.out);
+    const repTag = neu.out.length ? "無補正想定" : (up.out.length ? `${defStatJp}↑性格想定` : `${defStatJp}↓性格想定`);
+    const band = scoutBand(repOut);
+    const bandAll = scoutBand(all);
+
+    // あり得る防御性格
+    const natLabels = [];
+    if (up.out.length) natLabels.push("↑");
+    if (neu.out.length) natLabels.push("無");
+    if (dn.out.length) natLabels.push("↓");
+
+    // 同じ技での確定数レンジ（満タン基準）
+    const gs = all.map((c) => c.guaranteed);
+    const koFinite = gs.filter((x) => x != null);
+    const koMin = koFinite.length ? Math.min(...koFinite) : null;
+    const koMax = gs.some((x) => x == null) ? null : Math.max(...koFinite);
+    const koLabel = koMin === null ? "16発でも倒しきれない配分あり"
+      : koMax === null ? `確定${koMin}発〜（倒しきれない配分あり）`
+        : koMin === koMax ? `確定${koMin}発` : `確定${koMin}〜${koMax}発`;
+    const tip = koMin === 1 ? "同じ技で押し切れる。引き先・持ち物(きあいのタスキ/半減実)にだけ注意。"
+      : (koMin != null && koMin <= 2) ? "同じ技の連打で処理可能。素早さ関係と交代先に注意。"
+        : "このままだと打点不足。ランクアップ／急所／別タイプの高打点／状態異常での崩しを検討。";
+
+    // ① 推定配分（バンド表）。行が多い時は HP を間引き（両端は必ず残す）。
+    const rows = band.rows;
+    let shown = rows.filter((r) => r.hp % 4 === 0);
+    if (rows.length && shown[0] !== rows[0]) shown.unshift(rows[0]);
+    if (rows.length && shown[shown.length - 1] !== rows[rows.length - 1]) shown.push(rows[rows.length - 1]);
+    const sampled = shown.length < rows.length;
+    const bandRows = shown.map((r) => el("tr", {}, [
+      el("td", {}, `HP ${r.hp}`),
+      el("td", {}, r.defMin === r.defMax ? `${r.defMin}` : `${r.defMin}〜${r.defMax}`),
+    ]));
+    const bandTable = el("div", { class: "scout-band-wrap" }, [
+      el("table", { class: "scout-band" }, [
+        el("thead", {}, el("tr", {}, [el("th", {}, "HP-SP"), el("th", {}, `${defStatJp}-SP`)])),
+        el("tbody", {}, bandRows),
+      ]),
+    ]);
+    // 情報量が緩い（候補が広い）ときの注意
+    const spread = (bandAll.totalMax - bandAll.totalMin);
+    const wideNote = (bandAll.count > 400 || spread >= 24)
+      ? el("p", { class: "hint" }, "※ この観測だけでは絞り込みが緩めです（1発の与ダメには乱数16通り＝約±8%の不確実性が内在）。誤差%を実際の表示精度まで狭める／別の技や2回目の観測を加えると精度が上がります。")
+      : null;
+
+    const card1 = el("div", { class: "scout-card" }, [
+      el("h4", {}, "① 推定される耐久SP配分"),
+      el("p", { class: "scout-lead" }, `合致 ${bandAll.count} 通り｜HP+${defStatJp} 合計 ${bandAll.totalMin}〜${bandAll.totalMax}SP相当｜防御性格: ${natLabels.join(" ") || "—"}（${repTag}）`),
+      el("p", { class: "hint" }, `HP-SP と ${defStatJp}-SP は下表のように「トレードオフ」の関係。左を増やすほど右は少なくてよい。${sampled ? "（HPは間引き表示）" : ""}`),
+      bandTable,
+    ]);
+    if (wideNote) card1.appendChild(wideNote);
+
+    result.replaceChildren(
+      card1,
+      el("div", { class: "scout-card" }, [
+        el("h4", {}, "② 型のヒント"),
+        el("p", { class: "scout-lead" }, bulkVerdict(defStatJp, bandAll)),
+        moveHintNode(defender),
+      ]),
+      el("div", { class: "scout-card" }, [
+        el("h4", {}, "③ 対策"),
+        el("p", { class: "scout-lead" }, `推定配分に対し、あなたの ${move.nameJp || move.name} は ${koLabel}（満タン基準）。`),
+        el("p", { class: "hint" }, tip),
+      ]),
+    );
+  }
+
+  // 相手のよく使う技（採用率上位）を採用率つきで表示（型の裏取り用）
+  function moveHintNode(def) {
+    const adopt = (store.usage?.moveAdoptionByDex || {})[String(def.dexNumber)] || {};
+    const top = Object.entries(adopt).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    if (!top.length) return el("p", { class: "hint" }, "この相手の技採用率データはありません。");
+    return el("div", {}, [
+      el("p", { class: "hint" }, "よく使う技（採用率）:"),
+      el("div", { class: "scout-moves" }, top.map(([nm, rate]) =>
+        el("span", { class: "scout-move-chip" }, `${nm} ${rate}%`))),
+    ]);
+  }
+
+  const grid = el("div", { class: "dmg-grid" }, [
+    el("section", { class: "card" }, [
+      el("h3", {}, "攻撃側（自分）"),
+      labeled("ポケモン", atkSel),
+      labeled("わざ", moveSel),
+      el("div", { class: "fav-row2" }, [labeled("攻撃SP", atkSP), labeled("ランク補正", atkRankSel)]),
+      labeled("性格補正", atkNature),
+      labeled("とくせい", atkAbilSel),
+      labeled("持ち物", atkItemSel),
+    ]),
+    el("section", { class: "card" }, [
+      el("h3", {}, "防御側（相手）"),
+      labeled("ポケモン", defSel),
+      el("div", { class: "fav-row2" }, [labeled("与えたダメージ %", obsInput), labeled("許容誤差 ±%", tolInput)]),
+      labeled("とくせい（分かれば）", defAbilSel),
+      labeled("持ち物（分かれば）", defItemSel),
+    ]),
+  ]);
+  const fieldRow = el("section", { class: "card" }, [
+    el("h3", {}, "場の状態"),
+    el("div", { class: "sp-controls" }, [labeled("天候", weatherSel), labeled("フィールド", terrainSel), labeled("壁", screenSel)]),
+  ]);
+  const modRow = el("div", { class: "toggles" }, [
+    el("label", { class: "toggle" }, [cbCrit, " 急所"]),
+    el("label", { class: "toggle" }, [cbBurn, " やけど(物理×0.5)"]),
+  ]);
+
+  root.append(grid, fieldRow, modRow, result);
+  refreshMoves();
+  fillAbilitySelect(atkAbilSel, attacker);
+  fillAbilitySelect(defAbilSel, defender);
+  lockMegaItem(atkItemSel, attacker);
+  lockMegaItem(defItemSel, defender);
+  render();
+  return root;
+}
+
+// ---- モード: 耐え調整（従来の逆算。必要耐久SPを逆算） ----
+function surviveMode() {
+  const root = el("div");
   let attacker, defender;
 
   // 攻撃側
-  const atkSel = pokemonSelect((p) => { attacker = p; refreshMoves(); fillAbilitySelect(atkAbilSel, p); applyMega2(atkItemSel, p); render(); }, "rv-atk");
+  const atkSel = pokemonSelect((p) => { attacker = p; refreshMoves(); fillAbilitySelect(atkAbilSel, p); lockMegaItem(atkItemSel, p); render(); }, "rv-atk");
   const moveSel = el("select", { class: "move-select", onchange: render });
   const atkSP = spInput(SP_MAX_PER_STAT, "rv-atk-sp");
   const atkNature = natureTriToggle("up");
@@ -1574,7 +1847,7 @@ function reverseTab() {
   const atkItemSel = realItemSelect("atk", render);
 
   // 防御側
-  const defSel = pokemonSelect((p) => { defender = p; fillAbilitySelect(defAbilSel, p); applyMega2(defItemSel, p); render(); }, "rv-def");
+  const defSel = pokemonSelect((p) => { defender = p; fillAbilitySelect(defAbilSel, p); lockMegaItem(defItemSel, p); render(); }, "rv-def");
   attacker = store.pokemonByName.get(atkSel.value);
   defender = store.pokemonByName.get(defSel.value);
   const defNature = natureTriToggle("neutral");
@@ -1597,17 +1870,6 @@ function reverseTab() {
 
   const result = el("div", { class: "dmg-result" });
 
-  function applyMega2(itemSel, p) {
-    if (p.form === "Mega" && p.megaStone) {
-      if (![...itemSel.options].some((o) => o.value === p.megaStone.name)) {
-        itemSel.appendChild(el("option", { value: p.megaStone.name }, p.megaStone.nameJp));
-      }
-      itemSel.value = p.megaStone.name; itemSel.disabled = true; itemSel.classList.add("locked");
-    } else {
-      itemSel.disabled = false; itemSel.classList.remove("locked");
-      if (itemSel.value && store.itemsByName.get(itemSel.value)?.category === "mega-stones") itemSel.value = "";
-    }
-  }
   function refreshMoves() {
     const list = attackingMovesFor(attacker);
     const order = store.typechart?.types || [];
@@ -1701,15 +1963,12 @@ function reverseTab() {
     el("label", { class: "toggle" }, [cbBurn, " やけど(物理×0.5)"]),
   ]);
 
-  root.append(
-    el("p", { class: "hint" }, "相手の攻撃を「確定1発耐え」するのに必要な耐久SPを逆算します。HP/防御の片方を固定すると、もう片方の最小必要SPを表示。性格や持ち物・特性も考慮。"),
-    grid, fieldRow, modRow, result
-  );
+  root.append(grid, fieldRow, modRow, result);
   refreshMoves();
   fillAbilitySelect(atkAbilSel, attacker);
   fillAbilitySelect(defAbilSel, defender);
-  applyMega2(atkItemSel, attacker);
-  applyMega2(defItemSel, defender);
+  lockMegaItem(atkItemSel, attacker);
+  lockMegaItem(defItemSel, defender);
   render();
   return root;
 }

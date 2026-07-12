@@ -71,6 +71,43 @@ export function computeDamage(params) {
   return { rolls, min: rolls[0], max: rolls[rolls.length - 1], typeEff };
 }
 
+// ===== 逆算（与ダメ% → 相手の耐久SP推定）用の純粋ヘルパ =====
+//
+// 観測した割合(observed%)が、ある配分の取り得る割合レンジ[pctMin,pctMax]に
+// 収まるか（表示丸め等の許容 tol% を両端に足す）。
+export function observedMatches(pctMin, pctMax, observed, tol = 1) {
+  return observed >= pctMin - tol && observed <= pctMax + tol;
+}
+
+// 観測% がレンジのどちら側に外れているかを返す（UIの助言用）。
+//   "below": 観測が小さすぎ = 相手はもっと硬い/半減など想定外
+//   "above": 観測が大きすぎ = 相手はもっと柔らかい/こちらの火力が上
+//   "in":    レンジ内（許容込み）
+export function observedSide(pctMin, pctMax, observed, tol = 1) {
+  if (observed < pctMin - tol) return "below";
+  if (observed > pctMax + tol) return "above";
+  return "in";
+}
+
+// 整合した配分の配列 [{hpSP, defSP}] を「HP-SPごとの防御-SP範囲」に畳む。
+// 戻り値: { rows:[{hp,defMin,defMax}], hpMin,hpMax, defMin,defMax, totalMin,totalMax, count }
+export function scoutBand(combos) {
+  if (!combos.length) return { rows: [], hpMin: null, hpMax: null, defMin: null, defMax: null, totalMin: null, totalMax: null, count: 0 };
+  const byHp = new Map();
+  let hpMin = Infinity, hpMax = -Infinity, defMin = Infinity, defMax = -Infinity, totalMin = Infinity, totalMax = -Infinity;
+  for (const c of combos) {
+    hpMin = Math.min(hpMin, c.hpSP); hpMax = Math.max(hpMax, c.hpSP);
+    defMin = Math.min(defMin, c.defSP); defMax = Math.max(defMax, c.defSP);
+    const t = c.hpSP + c.defSP;
+    totalMin = Math.min(totalMin, t); totalMax = Math.max(totalMax, t);
+    const cur = byHp.get(c.hpSP);
+    if (!cur) byHp.set(c.hpSP, [c.defSP, c.defSP]);
+    else { cur[0] = Math.min(cur[0], c.defSP); cur[1] = Math.max(cur[1], c.defSP); }
+  }
+  const rows = [...byHp.entries()].sort((a, b) => a[0] - b[0]).map(([hp, [dmin, dmax]]) => ({ hp, defMin: dmin, defMax: dmax }));
+  return { rows, hpMin, hpMax, defMin, defMax, totalMin, totalMax, count: combos.length };
+}
+
 // 防御側HPに対するダメージ割合と確定数の要約。
 // maxHp=最大HP実数値、currentHp=現在HP（残りHP指定。既定は満タン）。
 // 割合は最大HP基準、確定数は現在HP基準で評価。
