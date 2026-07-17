@@ -108,6 +108,64 @@ export function scoutBand(combos) {
   return { rows, hpMin, hpMax, defMin, defMax, totalMin, totalMax, count: combos.length };
 }
 
+// ===== 型読みの「一目で分かる」評価 =====
+//
+// 耐久投資の目盛り: HP-SP + 防御-SP の合計。各32が上限なので 0〜64。
+// （SP合計上限は66なので、48以上を耐久に割くと他が2しか残らない＝極端な受け型）
+export const BULK_SP_MAX = 64;
+
+// 合計SP → 耐久ゾーン。境界は既存の型判定(8/24)を踏襲し、全振り域(48)を追加。
+export const BULK_ZONES = [
+  { key: "offensive", min: 0, label: "アタッカー", degree: "ほぼ無し" },
+  { key: "balanced", min: 8, label: "バランス", degree: "中" },
+  { key: "bulky", min: 24, label: "耐久寄り", degree: "高" },
+  { key: "fortress", min: 48, label: "要塞", degree: "最大級" },
+];
+
+export function bulkZone(totalSP) {
+  let hit = BULK_ZONES[0];
+  for (const z of BULK_ZONES) if (totalSP >= z.min) hit = z;
+  return hit;
+}
+
+// scoutBand の結果 → メーター表示用の評価。
+// レンジがゾーンをまたぐ時は「バランス〜耐久寄り」のように正直に幅で示す。
+// 戻り値: { label, degree, zoneMin, zoneMax, totalMin, totalMax, totalMid,
+//           bandLeftPct, bandWidthPct, markerPct, spans }
+export function scoutVerdict(band) {
+  if (!band || !band.count) return null;
+  const totalMin = band.totalMin, totalMax = band.totalMax;
+  const totalMid = (totalMin + totalMax) / 2;
+  const zMin = bulkZone(totalMin), zMax = bulkZone(totalMax), zMid = bulkZone(totalMid);
+  const spans = zMin.key !== zMax.key;
+  const pct = (v) => Math.max(0, Math.min(100, (v / BULK_SP_MAX) * 100));
+  // 確信度: レンジ幅が広いほど「読めていない」。中央値だけで断定しないための歯止め。
+  const width = totalMax - totalMin;
+  const confidence = width <= 12 ? "high" : width <= 28 ? "mid" : "low";
+  return {
+    label: spans ? `${zMin.label}〜${zMax.label}` : zMid.label,
+    degree: zMid.degree,
+    zoneMin: zMin.key, zoneMax: zMax.key, zoneMid: zMid.key,
+    totalMin, totalMax, totalMid, spans, width, confidence,
+    bandLeftPct: pct(totalMin),
+    bandWidthPct: pct(totalMax) - pct(totalMin),
+    markerPct: pct(totalMid),
+  };
+}
+
+// 単一ステの SP レンジ(0〜32) → ざっくり水準ラベルと、バー描画用の%。
+// 戻り値: { label, leftPct, widthPct, midPct }
+export function investLevel(spMin, spMax) {
+  const mid = (spMin + spMax) / 2;
+  const label = mid < 4 ? "ほぼ無振り"
+    : mid < 12 ? "少し"
+      : mid < 22 ? "中"
+        : mid < 30 ? "高め"
+          : "全振り級";
+  const pct = (v) => Math.max(0, Math.min(100, (v / 32) * 100));
+  return { label, leftPct: pct(spMin), widthPct: pct(spMax) - pct(spMin), midPct: pct(mid) };
+}
+
 // 防御側HPに対するダメージ割合と確定数の要約。
 // maxHp=最大HP実数値、currentHp=現在HP（残りHP指定。既定は満タン）。
 // 割合は最大HP基準、確定数は現在HP基準で評価。

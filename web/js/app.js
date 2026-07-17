@@ -3,7 +3,7 @@ import { loadData, store, getNature, attackingMovesFor, allMovesFor, byUsage } f
 import { calcStat, calcAllStats, STAT_KEYS, STAT_LABELS_JP, SP_MAX_PER_STAT, SP_TOTAL } from "./calc/stats.js";
 import { buildSpeedTable, speedPresets, applySpeedMods } from "./calc/speed.js";
 import { statStageMultiplier } from "./calc/stages.js";
-import { computeDamage, typeEffectiveness, stabMultiplier, summarize, observedMatches, scoutBand } from "./calc/damage.js";
+import { computeDamage, typeEffectiveness, stabMultiplier, summarize, observedMatches, scoutBand, scoutVerdict, investLevel, BULK_SP_MAX } from "./calc/damage.js";
 import {
   WEATHERS, TERRAINS, SCREENS, weatherDamageMult, weatherDefStatMult,
   terrainDamageMult, screenMult, abilityMods, itemMods, isAbilitySupported, itemRole, ateConversion,
@@ -1673,12 +1673,49 @@ function scoutMode() {
     return { out, eff };
   }
 
-  function bulkVerdict(defStatJp, band) {
-    const { totalMin: tmin, totalMax: tmax } = band;
-    if (tmin >= 24) return `かなりの耐久型。最低でも HP+${defStatJp} に合計 ${tmin}SP 相当を投資している。`;
-    if (tmin >= 8) return `そこそこ耐久を意識した配分（合計 ${tmin}〜${tmax}SP 相当）。`;
-    if (tmax <= 8) return `ほぼ無振り耐久 → 火力/素早さ重視の型（アタッカー）の可能性が高い。`;
-    return `無振り〜中耐久の幅（合計 ${tmin}〜${tmax}SP 相当）。`;
+  // 耐久メーターの評価を、平易な1文にする。
+  // レンジが広すぎる（confidence=low）ときは断定せず、絞り込み方を案内する。
+  function bulkLead(defStatJp, v) {
+    const amount = `HP＋${defStatJp} に <b>合計 ${v.totalMin}〜${v.totalMax}SP相当</b>`;
+    if (v.confidence === "low") {
+      return `<span class="em">この観測だけでは絞り込めません</span>（${amount}＝ほぼ全域）。誤差%を実際の表示精度まで狭める／威力の高い技で撃つ／2回目の観測を足すと読めるようになります。`;
+    }
+    if (v.zoneMid === "fortress") return `相手は<span class="em">耐久に全振り級</span>。${amount}。他の能力はほぼ捨てているはずで、崩しか積みが要ります。`;
+    if (v.zoneMid === "bulky") return `相手は<span class="em">耐久にしっかり振っています</span>。${amount}。数値受け・起点作りの型が濃厚です。`;
+    if (v.zoneMid === "balanced") return `相手は<span class="em">耐久を少し意識した配分</span>。${amount}。火力と両立させたバランス型の可能性。`;
+    return `相手は<span class="em">耐久にほぼ振っていません</span>。${amount}。火力／素早さ重視のアタッカーとみて良いです。`;
+  }
+
+  // 型の予想バッジ。①メーターの評価を主役に、技採用率を裏取りとして添える。
+  const HEAL_MOVES = new Set(["じこさいせい", "はねやすめ", "タマゴうみ", "なまける", "こうごうせい", "つきのひかり", "あさのひざし", "ミルクのみ", "ねむる", "ギガドレイン", "やどりぎのタネ", "ドレインパンチ"]);
+  const STATUS_MOVES = new Set(["あくび", "おにび", "どくどく", "でんじは", "キノコのほうし", "ねむりごな", "ちょうはつ", "みがわり", "でんじほう"]);
+  const HAZARD_MOVES = new Set(["ステルスロック", "まきびし", "どくびし", "ねばねばネット"]);
+  const BOOST_MOVES = new Set(["つるぎのまい", "りゅうのまい", "めいそう", "からをやぶる", "てっぺき", "ロックカット", "ビルドアップ", "わるだくみ", "せいちょう", "コスモパワー", "からをやぶる", "ちょうのまい"]);
+
+  function archetypeNode(def, v) {
+    const adopt = (store.usage?.moveAdoptionByDex || {})[String(def.dexNumber)] || {};
+    const top = Object.entries(adopt).sort((a, b) => b[1] - a[1]);
+    const hit = (set) => top.filter(([nm]) => set.has(nm)).slice(0, 2);
+    const chips = [];
+    // 主役＝メーターから導いた型（常に根拠が明快）。読めていない時は断定しない。
+    if (v.confidence === "low") {
+      chips.push(el("span", { class: "arche top unsure" }, ["判別不能", el("span", { class: "pct" }, "情報不足")]));
+    } else {
+      const primary = v.zoneMid === "fortress" ? "ガチ受け"
+        : v.zoneMid === "bulky" ? "数値受け"
+          : v.zoneMid === "balanced" ? "バランス" : "火力／素早さ重視";
+      chips.push(el("span", { class: "arche top" }, [primary, el("span", { class: "pct" }, v.degree === "ほぼ無し" ? "耐久ほぼ無し" : `耐久${v.degree}`)]));
+    }
+    // 裏取り＝採用率データに出ている技から
+    const bulky = v.zoneMid === "bulky" || v.zoneMid === "fortress";
+    const heal = hit(HEAL_MOVES), status = hit(STATUS_MOVES), hazard = hit(HAZARD_MOVES), boost = hit(BOOST_MOVES);
+    const add = (label, hits) => {
+      if (!hits.length) return;
+      chips.push(el("span", { class: "arche" }, [label, el("span", { class: "pct" }, hits.map(([nm, r]) => `${nm}${r}%`).join(" / "))]));
+    };
+    if (bulky) { add("回復持ち", heal); add("起点作り", status); add("置き土産", hazard); }
+    else { add("積み技あり", boost); add("変化技", status); }
+    return el("div", { class: "arche-row" }, chips);
   }
 
   function render() {
@@ -1738,61 +1775,121 @@ function scoutMode() {
       : (koMin != null && koMin <= 2) ? "同じ技の連打で処理可能。素早さ関係と交代先に注意。"
         : "このままだと打点不足。ランクアップ／急所／別タイプの高打点／状態異常での崩しを検討。";
 
-    // ① 推定配分（バンド表）。行が多い時は HP を間引き（両端は必ず残す）。
+    // ===== ① 耐久メーター（主役）=====
+    const v = scoutVerdict(bandAll);
+    const hpLv = investLevel(bandAll.hpMin, bandAll.hpMax);
+    const defLv = investLevel(bandAll.defMin, bandAll.defMax);
+    const otherStatJp = physical ? "とくぼう" : "ぼうぎょ";
+
+    // ゾーン境界（8/24/48 SP）を目盛りとして描く
+    const zoneEdges = [8, 24, 48].map((sp) =>
+      el("span", { class: "sc-divide", style: `left:${(sp / BULK_SP_MAX) * 100}%` }));
+    const track = el("div", { class: "sc-track" }, [
+      ...zoneEdges,
+      el("span", { class: `sc-band ${v.confidence === "low" ? "unsure" : `z-${v.zoneMid}`}`, style: `left:${v.bandLeftPct}%; width:${Math.max(v.bandWidthPct, 1.5)}%` }),
+      // 中央マーカー＝最尤の位置。読めていない時は出さない（中央値に意味がないため）
+      v.confidence === "low" ? null : el("span", { class: "sc-marker", style: `left:${v.markerPct}%` }),
+    ]);
+    const gauge = el("div", { class: "sc-gauge" }, [
+      el("div", { class: "sc-zones" }, ["アタッカー", "バランス", "耐久", "要塞"].map((t) => el("span", {}, t))),
+      track,
+      el("div", { class: "sc-scale" }, [
+        el("span", {}, "無振り 0"),
+        el("span", { class: "hl" }, `合計 ${v.totalMin}〜${v.totalMax}`),
+        el("span", {}, `フル ${BULK_SP_MAX}`),
+      ]),
+    ]);
+
+    // 内訳バー（HP / 撃った技が当たった側の防御）。バーは全幅を使い、ラベルは上段に置く。
+    const splitRow = (label, lv, cls, real) => el("div", { class: "sc-row" }, [
+      el("div", { class: "sc-row-head" }, [
+        el("span", { class: "sc-lbl" }, label),
+        el("span", { class: "sc-val" }, [el("b", {}, lv.label), real ? ` ${real}` : ""]),
+      ]),
+      el("span", { class: "sc-bar" }, el("span", { class: `sc-fill ${cls}`, style: `left:${lv.leftPct}%; width:${Math.max(lv.widthPct, 3)}%` })),
+    ]);
+    const hpReal = `実HP ${calcStat(defender.base.hp, bandAll.hpMin, "hp", 1.0)}〜${calcStat(defender.base.hp, bandAll.hpMax, "hp", 1.0)}`;
+    const defKey = physical ? "def" : "spd";
+    const dLo = calcStat(defender.base[defKey], bandAll.defMin, defKey, dn.out.length ? 0.9 : 1.0);
+    const dHi = calcStat(defender.base[defKey], bandAll.defMax, defKey, up.out.length ? 1.1 : 1.0);
+    const split = el("div", { class: "sc-split" }, [
+      splitRow("HP振り", hpLv, "hp", hpReal),
+      splitRow(`${defStatJp}振り`, defLv, "def", `実${defStatJp} ${dLo}〜${dHi}`),
+    ]);
+
+    const card1 = el("div", { class: "scout-card" }, [
+      el("h4", {}, "① 相手の耐久"),
+      el("div", { class: "sc-verdict" }, [
+        el("span", { class: `sc-arch${v.confidence === "low" ? " unsure" : ""}` }, v.confidence === "low" ? "絞り込めず" : v.label),
+        v.confidence === "low"
+          ? el("span", { class: "sc-deg" }, el("b", { class: "unsure" }, "情報不足"))
+          : el("span", { class: "sc-deg" }, [`耐久投資度 `, el("b", { class: `z-${v.zoneMid}` }, v.degree)]),
+      ]),
+      el("p", { class: "sc-lead", html: bulkLead(defStatJp, v) }),
+      gauge,
+      split,
+      el("p", { class: "sc-foot" }, `※ ${move.nameJp || move.name} は${physical ? "物理" : "特殊"}技なので、分かるのは HP と ${defStatJp} まで。${otherStatJp}（${physical ? "特殊" : "物理"}耐久）は${physical ? "特殊" : "物理"}技で撃つと読めます。`),
+    ]);
+
+    // ===== ② 型の予想 =====
+    const card2 = el("div", { class: "scout-card" }, [
+      el("h4", {}, "② 型の予想"),
+      archetypeNode(defender, v),
+      el("p", { class: "sc-sub" }, "↑は耐久投資度と、下の「よく使う技（採用率）」から推定したもの。"),
+      moveHintNode(defender),
+    ]);
+
+    // ===== ③ 対策 =====
+    const card3 = el("div", { class: "scout-card" }, [
+      el("h4", {}, "③ 対策"),
+      el("div", { class: "sc-ko" }, [
+        el("span", { class: `sc-ko-big ${koMin != null && koMin <= 2 ? "good" : "bad"}` }, koLabel),
+        el("span", { class: "sc-ko-lab" }, `あなたの ${move.nameJp || move.name}（満タン基準）`),
+      ]),
+      el("p", { class: "sc-tip" }, tip),
+    ]);
+
+    // ===== ④ 詳細（従来のSP配分表を折りたたみで温存）=====
     const rows = band.rows;
     let shown = rows.filter((r) => r.hp % 4 === 0);
     if (rows.length && shown[0] !== rows[0]) shown.unshift(rows[0]);
     if (rows.length && shown[shown.length - 1] !== rows[rows.length - 1]) shown.push(rows[rows.length - 1]);
     const sampled = shown.length < rows.length;
+    const repNat = neu.out.length ? 1.0 : (up.out.length ? 1.1 : 0.9);
     const bandRows = shown.map((r) => el("tr", {}, [
-      el("td", {}, `HP ${r.hp}`),
+      el("td", {}, `${r.hp}`),
       el("td", {}, r.defMin === r.defMax ? `${r.defMin}` : `${r.defMin}〜${r.defMax}`),
+      el("td", {}, `${calcStat(defender.base.hp, r.hp, "hp", 1.0)}`),
+      el("td", {}, r.defMin === r.defMax
+        ? `${calcStat(defender.base[defKey], r.defMin, defKey, repNat)}`
+        : `${calcStat(defender.base[defKey], r.defMin, defKey, repNat)}〜${calcStat(defender.base[defKey], r.defMax, defKey, repNat)}`),
     ]));
-    const bandTable = el("div", { class: "scout-band-wrap" }, [
-      el("table", { class: "scout-band" }, [
-        el("thead", {}, el("tr", {}, [el("th", {}, "HP-SP"), el("th", {}, `${defStatJp}-SP`)])),
-        el("tbody", {}, bandRows),
+    const details = el("details", { class: "scout-more" }, [
+      el("summary", {}, `推定される耐久SP配分を詳しく見る（合致 ${bandAll.count} 通り）`),
+      el("p", { class: "sc-note" }, `HP-SP と ${defStatJp}-SP はトレードオフ。左を増やすほど右は少なくてよい。実数値は${repTag}／防御性格の候補: ${natLabels.join(" ") || "—"}。${sampled ? "（HPは間引き表示）" : ""}`),
+      el("div", { class: "scout-band-wrap" }, [
+        el("table", { class: "scout-band" }, [
+          el("thead", {}, el("tr", {}, [el("th", {}, "HP-SP"), el("th", {}, `${defStatJp}-SP`), el("th", {}, "実HP"), el("th", {}, `実${defStatJp}`)])),
+          el("tbody", {}, bandRows),
+        ]),
       ]),
     ]);
     // 情報量が緩い（候補が広い）ときの注意
     const spread = (bandAll.totalMax - bandAll.totalMin);
-    const wideNote = (bandAll.count > 400 || spread >= 24)
-      ? el("p", { class: "hint" }, "※ この観測だけでは絞り込みが緩めです（1発の与ダメには乱数16通り＝約±8%の不確実性が内在）。誤差%を実際の表示精度まで狭める／別の技や2回目の観測を加えると精度が上がります。")
-      : null;
+    if (bandAll.count > 400 || spread >= 24) {
+      details.appendChild(el("p", { class: "sc-note" }, "※ この観測だけでは絞り込みが緩めです（1発の与ダメには乱数16通り＝約±8%の不確実性が内在）。誤差%を実際の表示精度まで狭める／別の技や2回目の観測を加えると精度が上がります。"));
+    }
 
-    const card1 = el("div", { class: "scout-card" }, [
-      el("h4", {}, "① 推定される耐久SP配分"),
-      el("p", { class: "scout-lead" }, `合致 ${bandAll.count} 通り｜HP+${defStatJp} 合計 ${bandAll.totalMin}〜${bandAll.totalMax}SP相当｜防御性格: ${natLabels.join(" ") || "—"}（${repTag}）`),
-      el("p", { class: "hint" }, `HP-SP と ${defStatJp}-SP は下表のように「トレードオフ」の関係。左を増やすほど右は少なくてよい。${sampled ? "（HPは間引き表示）" : ""}`),
-      bandTable,
-    ]);
-    if (wideNote) card1.appendChild(wideNote);
-
-    result.replaceChildren(
-      card1,
-      el("div", { class: "scout-card" }, [
-        el("h4", {}, "② 型のヒント"),
-        el("p", { class: "scout-lead" }, bulkVerdict(defStatJp, bandAll)),
-        moveHintNode(defender),
-      ]),
-      el("div", { class: "scout-card" }, [
-        el("h4", {}, "③ 対策"),
-        el("p", { class: "scout-lead" }, `推定配分に対し、あなたの ${move.nameJp || move.name} は ${koLabel}（満タン基準）。`),
-        el("p", { class: "hint" }, tip),
-      ]),
-    );
+    result.replaceChildren(card1, card2, card3, details);
   }
 
   // 相手のよく使う技（採用率上位）を採用率つきで表示（型の裏取り用）
   function moveHintNode(def) {
     const adopt = (store.usage?.moveAdoptionByDex || {})[String(def.dexNumber)] || {};
     const top = Object.entries(adopt).sort((a, b) => b[1] - a[1]).slice(0, 6);
-    if (!top.length) return el("p", { class: "hint" }, "この相手の技採用率データはありません。");
-    return el("div", {}, [
-      el("p", { class: "hint" }, "よく使う技（採用率）:"),
-      el("div", { class: "scout-moves" }, top.map(([nm, rate]) =>
-        el("span", { class: "scout-move-chip" }, `${nm} ${rate}%`))),
-    ]);
+    if (!top.length) return el("p", { class: "sc-sub" }, "この相手の技採用率データはありません。");
+    return el("div", { class: "scout-moves" }, top.map(([nm, rate]) =>
+      el("span", { class: "scout-move-chip" }, [nm, el("b", {}, `${rate}%`)])));
   }
 
   const grid = el("div", { class: "dmg-grid" }, [

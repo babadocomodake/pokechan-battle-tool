@@ -726,18 +726,94 @@ input, select, textarea,
 /* 与えたダメージ%・許容誤差の数値入力 */
 .obs-input { width: 100%; background: var(--surface-2); color: var(--text); border: 0; border-radius: var(--radius); padding: 9px 10px; font-family: inherit; }
 
-/* 型読みの結果カード */
-.scout-card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--frame); padding: 12px 14px; margin-top: 12px; }
-.scout-card h4 { margin: 0 0 6px; font-size: .95rem; color: var(--accent); }
+/* 型読みの結果カード（.dmg-result が中央寄せなので左揃えに戻す） */
+.scout-card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--frame); padding: 13px 14px 15px; margin-top: 12px; text-align: left; }
+.scout-card h4 { margin: 0 0 9px; font-size: .72rem; letter-spacing: .1em; color: var(--dim); display: flex; align-items: center; gap: 7px; }
+.scout-card h4::before { content: ""; width: 10px; height: 10px; background: var(--accent-2); border-radius: 1px; box-shadow: inset 1px 1px 0 rgba(255,255,255,.4); }
 .scout-lead { margin: 4px 0 8px; font-size: .9rem; line-height: 1.5; }
 
+/* 耐久ゾーンの意味色（アタッカー=赤 / バランス=金 / 耐久・要塞=緑） */
+.z-offensive { color: var(--bad); }
+.z-balanced { color: var(--accent); }
+.z-bulky, .z-fortress { color: var(--good); }
+
+/* ①-a 型の判定（大見出し） */
+.sc-verdict { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.sc-arch { font-size: 1.45rem; font-weight: 800; color: var(--accent); letter-spacing: .02em; text-shadow: 2px 2px 0 #061436; }
+/* 読めていない時は金の断定色を使わない（誤誘導を避ける） */
+.sc-arch.unsure { color: var(--dim); }
+b.unsure { color: var(--dim); }
+.arche.top.unsure { background: var(--surface-2); color: var(--dim); box-shadow: 0 0 0 2px var(--line); }
+.arche.top.unsure .pct { color: var(--dim); }
+.sc-deg { margin-left: auto; font-size: .78rem; color: var(--dim); }
+.sc-deg b { font-size: .95rem; }
+.sc-lead { margin: 4px 0 14px; font-size: .88rem; line-height: 1.55; }
+.sc-lead .em { color: var(--accent); font-weight: 700; }
+.sc-lead b { color: var(--text); }
+.sc-foot { margin: 12px 0 0; font-size: .72rem; color: var(--dim); }
+
+/* ①-b 耐久メーター */
+.sc-gauge { margin-top: 4px; }
+.sc-zones { display: flex; font-size: .66rem; color: var(--dim); margin-bottom: 4px; }
+.sc-zones span { flex: 1; text-align: center; }
+.sc-zones span:first-child { text-align: left; }
+.sc-zones span:last-child { text-align: right; }
+.sc-track { position: relative; height: 22px; border-radius: 3px; background: #2b2f3a; box-shadow: inset 2px 2px 0 rgba(0,0,0,.45), 0 0 0 2px var(--line); }
+.sc-divide { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(12,11,22,.75); }
+.sc-band { position: absolute; top: 0; bottom: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,.25);
+  background: repeating-linear-gradient(135deg, rgba(255,210,63,.85) 0 7px, rgba(255,210,63,.6) 7px 14px); }
+.sc-band.unsure { background: repeating-linear-gradient(135deg, rgba(195,200,212,.5) 0 7px, rgba(195,200,212,.28) 7px 14px); }
+.sc-band.z-offensive { background: repeating-linear-gradient(135deg, rgba(255,107,107,.85) 0 7px, rgba(255,107,107,.6) 7px 14px); }
+.sc-band.z-bulky, .sc-band.z-fortress { background: repeating-linear-gradient(135deg, rgba(91,224,138,.85) 0 7px, rgba(91,224,138,.6) 7px 14px); }
+.sc-marker { position: absolute; top: -4px; bottom: -4px; width: 3px; background: var(--text); box-shadow: 0 0 0 1px #061436; }
+.sc-scale { display: flex; justify-content: space-between; font-size: .66rem; color: var(--dim); margin-top: 5px; font-variant-numeric: tabular-nums; }
+.sc-scale .hl { color: var(--accent); font-weight: 700; }
+
+/* ①-c 内訳バー（HP / 防御の振り具合）。バーは全幅、ラベルは上段。 */
+.sc-split { display: flex; flex-direction: column; gap: 11px; margin-top: 16px; }
+.sc-row-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.sc-lbl { color: var(--dim); white-space: nowrap; font-size: .76rem; }
+.sc-bar { display: block; position: relative; height: 10px; border-radius: 2px; background: #2b2f3a; box-shadow: inset 1px 1px 0 rgba(0,0,0,.4); }
+.sc-fill { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
+.sc-fill.hp { background: linear-gradient(90deg, var(--accent-2), #8aa0d8); }
+.sc-fill.def { background: linear-gradient(90deg, #3f9d6b, var(--good)); }
+.sc-val { font-size: .74rem; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sc-val b { color: var(--text); font-weight: 700; }
+
+/* ② 型の予想バッジ */
+.arche-row { display: flex; flex-wrap: wrap; gap: 7px; }
+.arche { background: var(--surface-2); border-radius: 2px; padding: 6px 11px; font-size: .8rem; box-shadow: 0 0 0 2px var(--line); display: inline-flex; gap: 6px; align-items: baseline; }
+.arche.top { background: linear-gradient(180deg, #6a5cc0, var(--accent-2)); color: #fff; box-shadow: 0 0 0 2px var(--accent); font-weight: 700; }
+.arche .pct { color: var(--accent); font-weight: 700; font-size: .74rem; font-variant-numeric: tabular-nums; }
+.arche.top .pct { color: #fff2b0; }
+.sc-sub { margin: 11px 0 8px; font-size: .72rem; color: var(--dim); }
+
+/* ③ 対策 */
+.sc-ko { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; margin-bottom: 8px; }
+.sc-ko-big { font-size: 1.1rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.sc-ko-big.good { color: var(--good); }
+.sc-ko-big.bad { color: var(--bad); }
+.sc-ko-lab { font-size: .78rem; color: var(--dim); }
+.sc-tip { margin: 0; font-size: .82rem; background: var(--bg); border-radius: 2px; padding: 9px 11px; box-shadow: inset 4px 0 0 0 var(--accent-2); }
+
+/* ④ 詳細（折りたたみ） */
+.scout-more { background: var(--surface); border-radius: var(--radius); box-shadow: var(--frame); padding: 0 14px; margin-top: 12px; text-align: left; }
+.scout-more summary { cursor: pointer; list-style: none; padding: 12px 0; font-size: .78rem; color: var(--dim); display: flex; align-items: center; gap: 8px; }
+.scout-more summary::-webkit-details-marker { display: none; }
+.scout-more summary::before { content: "▸"; color: var(--accent-2); }
+.scout-more[open] summary::before { content: "▾"; }
+.scout-more summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sc-note { font-size: .72rem; color: var(--dim); margin: 0 0 10px; }
+.scout-more > .sc-note:last-child { padding-bottom: 12px; }
+
 /* 推定配分バンド表（HP-SP ↔ 防御-SP のトレードオフ） */
-.scout-band-wrap { overflow-x: auto; margin-top: 8px; }
+.scout-band-wrap { overflow-x: auto; margin: 0 0 12px; }
 .scout-band { border-collapse: collapse; font-size: .85rem; min-width: 180px; }
 .scout-band th, .scout-band td { padding: 5px 12px; border-bottom: 2px solid var(--bg); text-align: left; white-space: nowrap; }
 .scout-band th { color: var(--dim); font-size: .78rem; }
 .scout-band tbody tr:nth-child(odd) td { background: rgba(95,120,184,.10); }
 
-/* よく使う技チップ */
+/* よく使う技チップ（採用率は数値なので等幅で揃える） */
 .scout-moves { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.scout-move-chip { background: var(--surface-2); color: var(--text); border-radius: var(--radius); padding: 4px 9px; font-size: .8rem; }
+.scout-move-chip { background: var(--surface-2); color: var(--text); border-radius: var(--radius); padding: 4px 9px; font-size: .8rem; display: inline-flex; gap: 6px; align-items: baseline; }
+.scout-move-chip b { color: var(--dim); font-weight: 400; font-size: .74rem; font-variant-numeric: tabular-nums; }

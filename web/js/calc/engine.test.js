@@ -10,7 +10,7 @@ import {
   weatherDamageMult, weatherDefStatMult, terrainDamageMult, screenMult,
   abilityMods, itemMods, isAbilitySupported, ateConversion, ignoresDefenderAbility,
 } from "./modifiers.js";
-import { computeDamage, summarize, observedMatches, observedSide, scoutBand } from "./damage.js";
+import { computeDamage, summarize, observedMatches, observedSide, scoutBand, scoutVerdict, bulkZone, investLevel, BULK_SP_MAX } from "./damage.js";
 
 test("calcStat: 実数値（Lv50/IV31/SP制）", () => {
   assert.equal(calcStat(100, 0, "hp"), 175);            // HP = core+60
@@ -215,6 +215,68 @@ test("逆算: scoutBand（整合配分をHPごとの防御SP範囲へ畳む）",
   assert.deepEqual(b.rows[2], { hp: 8, defMin: 12, defMax: 12 });
   // 空でも壊れない
   assert.equal(scoutBand([]).count, 0);
+});
+
+test("型読み: bulkZone（合計SP → 耐久ゾーン）", () => {
+  assert.equal(bulkZone(0).key, "offensive");
+  assert.equal(bulkZone(7).key, "offensive");
+  assert.equal(bulkZone(8).key, "balanced");   // 境界は下側ゾーンの始まり
+  assert.equal(bulkZone(23).key, "balanced");
+  assert.equal(bulkZone(24).key, "bulky");
+  assert.equal(bulkZone(47).key, "bulky");
+  assert.equal(bulkZone(48).key, "fortress");
+  assert.equal(bulkZone(64).key, "fortress");
+});
+
+test("型読み: scoutVerdict（バンド → メーター表示用の評価）", () => {
+  // 合計 28〜44 = 耐久ゾーンに収まる
+  const v = scoutVerdict(scoutBand([{ hpSP: 16, defSP: 12 }, { hpSP: 24, defSP: 20 }]));
+  assert.equal(v.totalMin, 28); assert.equal(v.totalMax, 44);
+  assert.equal(v.totalMid, 36);
+  assert.equal(v.label, "耐久寄り");   // またがないので単一ラベル
+  assert.equal(v.spans, false);
+  assert.equal(v.degree, "高");
+  assert.equal(v.bandLeftPct, (28 / BULK_SP_MAX) * 100);
+  assert.equal(v.markerPct, (36 / BULK_SP_MAX) * 100);
+
+  // ゾーンをまたぐ時は幅で正直に示す（合計 4〜32 = アタッカー域〜耐久域）
+  const w = scoutVerdict(scoutBand([{ hpSP: 0, defSP: 4 }, { hpSP: 16, defSP: 16 }]));
+  assert.equal(w.totalMin, 4); assert.equal(w.totalMax, 32);
+  assert.equal(w.spans, true);
+  assert.equal(w.label, "アタッカー〜耐久寄り");
+
+  // 空バンドは null（呼び出し側で描画しない）
+  assert.equal(scoutVerdict(scoutBand([])), null);
+  assert.equal(scoutVerdict(null), null);
+});
+
+test("型読み: scoutVerdict の確信度（幅が広いほど断定しない）", () => {
+  // 幅12以下 = 読めている
+  const hi = scoutVerdict(scoutBand([{ hpSP: 12, defSP: 12 }, { hpSP: 16, defSP: 16 }]));
+  assert.equal(hi.width, 8);
+  assert.equal(hi.confidence, "high");
+  // 幅28以下 = ほどほど
+  const mid = scoutVerdict(scoutBand([{ hpSP: 4, defSP: 4 }, { hpSP: 16, defSP: 16 }]));
+  assert.equal(mid.width, 24);
+  assert.equal(mid.confidence, "mid");
+  // 幅が広すぎる = 情報不足。中央値で「耐久型」と断定してはいけないケース。
+  const lo = scoutVerdict(scoutBand([{ hpSP: 0, defSP: 14 }, { hpSP: 32, defSP: 32 }]));
+  assert.equal(lo.width, 50);
+  assert.equal(lo.confidence, "low");
+  assert.equal(lo.zoneMid, "bulky"); // 中央値だけ見ると耐久型に見えてしまう
+});
+
+test("型読み: investLevel（単一ステのSPレンジ → ざっくり水準）", () => {
+  assert.equal(investLevel(0, 2).label, "ほぼ無振り");
+  assert.equal(investLevel(4, 12).label, "少し");     // mid=8
+  assert.equal(investLevel(12, 20).label, "中");      // mid=16
+  assert.equal(investLevel(20, 28).label, "高め");    // mid=24
+  assert.equal(investLevel(30, 32).label, "全振り級");// mid=31
+  // バー描画用の% は 0〜32 を 0〜100% に写す
+  const lv = investLevel(8, 24);
+  assert.equal(lv.leftPct, 25);
+  assert.equal(lv.widthPct, 50);
+  assert.equal(lv.midPct, 50);
 });
 
 // 乱数の [min, max] を取り出す小ヘルパ
