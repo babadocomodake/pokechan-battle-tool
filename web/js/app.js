@@ -636,6 +636,44 @@ function fillAbilitySelect(sel, pokemon) {
   // 既定＝最採用とくせい。無ければ第一とくせい（「影響なし」にはしない）。
   sel.value = pokemon.topAbility && abils.includes(pokemon.topAbility) ? pokemon.topAbility : (abils[0] || "");
 }
+
+// とくせいselect＋「反映/無視」トグルの複合フィールド。
+// トグルOFFのとき value() は "" を返すので、cond に渡せば特性の効果を一括で外せる
+// （computeOne は無改修）。選択した特性名は保持され、トグルで即復帰できる。
+function abilityField(onChange) {
+  const select = el("select", { class: "abil-select", onchange: onChange });
+  let enabled = true;
+  const btn = el("button", { type: "button", class: "abil-toggle", "aria-pressed": "true",
+    title: "特性の効果を反映するか切り替え" });
+  function paint() {
+    btn.textContent = enabled ? "反映" : "無視";
+    btn.classList.toggle("off", !enabled);
+    btn.setAttribute("aria-pressed", enabled ? "true" : "false");
+    select.classList.toggle("abil-muted", !enabled);
+  }
+  function setEnabled(v) { enabled = !!v; paint(); }
+  btn.addEventListener("click", () => { setEnabled(!enabled); onChange(); });
+  paint();
+  const node = el("div", { class: "abil-field" }, [select, btn]);
+  return {
+    select, node,
+    value: () => (enabled ? select.value : ""),
+    get enabled() { return enabled; },
+    setEnabled,
+  };
+}
+
+// 逆算系タブ用: 相手の特性で無効化されている時の通知カード（ワンタップで特性を無視）。
+function abilityImmuneNotice(defender, defAbil, rerender, verb = "逆算") {
+  const dAb = defAbil.value();
+  const idx = (defender.abilities || []).indexOf(dAb);
+  const abJp = (idx >= 0 && (defender.abilitiesJp || [])[idx]) || dAb;
+  return el("div", { class: "dmg-immune-notice" }, [
+    el("span", {}, `☀ ${defender.nameJp} の ${abJp} で無効。この状態では${verb}できません。`),
+    el("button", { type: "button", class: "immune-fix",
+      onclick: () => { defAbil.setEnabled(false); rerender(); } }, `特性を無視して${verb}する`),
+  ]);
+}
 function fieldSelect(list, onChange) {
   return el("select", { onchange: onChange }, list.map((o) => el("option", { value: o.id }, o.label)));
 }
@@ -828,7 +866,7 @@ function damageTab(preset) {
   const moveCondWrap = el("div", { class: "move-cond" });
   function renderConds() {
     const mv = moveSel.value;
-    const ab = atkAbilSel.value;
+    const ab = atkAbil.value();
     const rows = [];
     const fieldRow = (label, node) => el("div", { class: "field" }, [el("label", {}, label), node]);
     // 入力は「必要なら1回だけ」出す（技と特性の両方が同じ入力を要求しても重複させない）
@@ -847,7 +885,7 @@ function damageTab(preset) {
     if (ab === "Sharpness") rows.push(el("p", { class: "hint" }, SLICING_MOVES.has(mv) ? "自動: 切断技なので ×1.5" : "きれあじ: 切断技のとき ×1.5（この技は対象外）"));
     if (ab === "Parental Bond") rows.push(el("p", { class: "hint" }, "自動: おやこあい＝2回攻撃の合計 約×1.25（親1.0＋子0.25）"));
     // ばけのかわ（受け側の特性）: 皮の有無で1発無効を切替。
-    if (defAbilSel.value === "Disguise") {
+    if (defAbil.value() === "Disguise") {
       rows.push(el("label", { class: "toggle" }, [disguiseCb, " 化けの皮あり＝この技は0ダメージ（実戦では別途HP1/8削れ）"]));
     }
     moveCondWrap.replaceChildren(...rows);
@@ -855,7 +893,8 @@ function damageTab(preset) {
   const atkSP = spInput(SP_MAX_PER_STAT, "atk-sp");
   const atkNature = natureTriToggle("up");
   const atkRankSel = rankSelect(render);
-  const atkAbilSel = el("select", { class: "abil-select", onchange: () => { renderConds(); render(); } });
+  const atkAbil = abilityField(() => { renderConds(); render(); });
+  const atkAbilSel = atkAbil.select;
   const atkItemSel = realItemSelect("atk", render);
   const atkRecents = el("div", { class: "recents" });
   function renderAtkRecents() {
@@ -998,7 +1037,8 @@ function damageTab(preset) {
   const defSP = spInput(0, "def-sp");      // 防御への努力値（単一）
   const defNat = natureTriToggle("neutral"); // 防御の性格補正（単一）
   const defRankSel = rankSelect(render);
-  const defAbilSel = el("select", { class: "abil-select", onchange: render });
+  const defAbil = abilityField(render);
+  const defAbilSel = defAbil.select;
   const defItemSel = realItemSelect("def", render);
   const remainHp = el("input", { type: "number", min: "0", max: "100", value: "100", class: "sp-input", id: "def-remain" });
 
@@ -1186,7 +1226,7 @@ function damageTab(preset) {
       defSP: clampSPVal(defSP.value), defNat: defNat.get(),
       defHpSP: clampSPVal(defHpSP.value),
       atkRank: parseInt(atkRankSel.value, 10) || 0, defRank: parseInt(defRankSel.value, 10) || 0,
-      atkAbility: atkAbilSel.value, defAbility: defAbilSel.value,
+      atkAbility: atkAbil.value(), defAbility: defAbil.value(),
       atkItem: itemObj(atkItemSel.value), defItem: itemObj(defItemSel.value),
       weather: weatherSel.value, terrain: terrainSel.value, screen: screenSel.value,
       burn: cbBurn.checked,
@@ -1223,7 +1263,20 @@ function damageTab(preset) {
     const rN = computeOne(attacker, defender, move, { ...cond, crit: false });
     const rC = computeOne(attacker, defender, move, { ...cond, crit: true });
     const curHp = Math.max(1, Math.floor(rN.maxHp * cond.remainPct / 100));
-    dockLines.replaceChildren(dockLine("通常", rN, curHp), dockLine("急所", rC, curHp));
+    const lines = [dockLine("通常", rN, curHp), dockLine("急所", rC, curHp)];
+    // 特性で無効になっている時は、目立つ通知＋ワンタップで特性を無視できる導線を先頭に出す。
+    if (rN.immune && defAbil.value()) {
+      const dAb = defAbil.value();
+      const idx = (defender.abilities || []).indexOf(dAb);
+      const abJp = (idx >= 0 && (defender.abilitiesJp || [])[idx]) || dAb;
+      // dock-lines は「タップで計算の詳細」を開くので、通知内のクリックは伝播を止める。
+      lines.unshift(el("div", { class: "dmg-immune-notice", onclick: (e) => e.stopPropagation() }, [
+        el("span", {}, `☀ ${defender.nameJp} の ${abJp} で無効。`),
+        el("button", { type: "button", class: "immune-fix",
+          onclick: (e) => { e.stopPropagation(); defAbil.setEnabled(false); render(); } }, "特性を無視して貫通ダメージを見る"),
+      ]));
+    }
+    dockLines.replaceChildren(...lines);
     // 詳細（シート）: 通常ベースの内訳・乱数（通常/急所）・ログ追加
     const s = rN.summary;
     resultMore.replaceChildren(
@@ -1299,8 +1352,8 @@ function damageTab(preset) {
   function multToState(m) { return m > 1 ? "up" : m < 1 ? "down" : "neutral"; }
   function swapSides() {
     const a = attacker, d = defender;
-    const aSP = clampSPVal(atkSP.value), aNat = atkNature.get(), aRank = atkRankSel.value, aAbil = atkAbilSel.value;
-    const dSP = clampSPVal(defSP.value), dNat = defNat.get(), dRank = defRankSel.value, dAbil = defAbilSel.value;
+    const aSP = clampSPVal(atkSP.value), aNat = atkNature.get(), aRank = atkRankSel.value, aAbil = atkAbilSel.value, aEn = atkAbil.enabled;
+    const dSP = clampSPVal(defSP.value), dNat = defNat.get(), dRank = defRankSel.value, dAbil = defAbilSel.value, dEn = defAbil.enabled;
     // 本体入替（pokemonSelectのsetterはonChange非発火なので各fillは手動）
     attacker = d; defender = a;
     atkSel.value = attacker.name; defSel.value = defender.name;
@@ -1311,6 +1364,7 @@ function damageTab(preset) {
     // とくせい：新本体で埋め直し、可能なら相手側の選択を引き継ぐ
     fillAbilitySelect(atkAbilSel, attacker); if ((attacker.abilities || []).includes(dAbil)) atkAbilSel.value = dAbil;
     fillAbilitySelect(defAbilSel, defender); if ((defender.abilities || []).includes(aAbil)) defAbilSel.value = aAbil;
+    atkAbil.setEnabled(dEn); defAbil.setEnabled(aEn); // 反映/無視トグルの状態も交換
     // 持ち物リセット（atk役割↔def役割でoptgroupが別物）＋メガ固定の再適用
     applyMega(atkItemSel, attacker); if (!atkItemSel.disabled) atkItemSel.value = "";
     applyMega(defItemSel, defender); if (!defItemSel.disabled) defItemSel.value = "";
@@ -1403,7 +1457,7 @@ function damageTab(preset) {
       labeledSP("攻撃振り", atkSP),
       atkPresets,
       el("div", { class: "fav-row2" }, [labeled("性格補正", atkNature), labeled("ランク補正", atkRankSel)]),
-      labeled("とくせい", atkAbilSel),
+      labeled("とくせい", atkAbil.node),
       el("div", { class: "field" }, [el("label", {}, "持ち物"), atkItemTrig, hiddenNative([atkItemSel])]),
     ]),
     el("section", { class: "card" }, [
@@ -1412,7 +1466,7 @@ function damageTab(preset) {
       labeledSP("防御振り", defSP),
       el("div", { class: "fav-row2" }, [labeled("性格補正", defNat), labeled("残りHP(%)", remainHp)]),
       labeled("ランク補正", defRankSel),
-      labeled("とくせい", defAbilSel),
+      labeled("とくせい", defAbil.node),
       el("div", { class: "field" }, [el("label", {}, "持ち物"), defItemTrig, hiddenNative([defItemSel])]),
     ]),
   ]);
@@ -1609,14 +1663,16 @@ function scoutMode() {
   const atkSP = spInput(SP_MAX_PER_STAT, "sc-atk-sp");
   const atkNature = natureTriToggle("up");
   const atkRankSel = rankSelect(render);
-  const atkAbilSel = el("select", { class: "abil-select", onchange: render });
+  const atkAbil = abilityField(render);
+  const atkAbilSel = atkAbil.select;
   const atkItemSel = realItemSelect("atk", render);
 
   // 防御側（相手。SP・性格は逆算対象なので入力しない。特性/道具は分かれば指定）
   const defSel = pokemonSelect((p) => { defender = p; fillAbilitySelect(defAbilSel, p); lockMegaItem(defItemSel, p); render(); }, "sc-def");
   attacker = store.pokemonByName.get(atkSel.value);
   defender = store.pokemonByName.get(defSel.value);
-  const defAbilSel = el("select", { class: "abil-select", onchange: render });
+  const defAbil = abilityField(render);
+  const defAbilSel = defAbil.select;
   const defItemSel = realItemSelect("def", render);
 
   // 場
@@ -1651,7 +1707,7 @@ function scoutMode() {
     return {
       atkSP: clampSPVal(atkSP.value), atkNat: atkNature.get(),
       atkRank: parseInt(atkRankSel.value, 10) || 0, defRank: 0,
-      atkAbility: atkAbilSel.value, defAbility: defAbilSel.value,
+      atkAbility: atkAbil.value(), defAbility: defAbil.value(),
       atkItem: itemObj(atkItemSel.value), defItem: itemObj(defItemSel.value),
       weather: weatherSel.value, terrain: terrainSel.value, screen: screenSel.value,
       crit: cbCrit.checked, burn: cbBurn.checked, remainPct: 100,
@@ -1727,6 +1783,13 @@ function scoutMode() {
 
     const physical = move.category === "Physical";
     const defStatJp = physical ? "ぼうぎょ" : "とくぼう";
+
+    // 相手の特性で無効化されていると逆算できない。特性を無視できる導線を先に出す。
+    const probe = computeOne(attacker, defender, move, { ...baseCond(), defHpSP: 16, defSP: 16, defNat: 1.0 });
+    if (probe.immune && defAbil.value()) {
+      result.replaceChildren(abilityImmuneNotice(defender, defAbil, render));
+      return;
+    }
 
     const neu = searchNat(move, 1.0, observed, tol);
     if (neu.eff === 0) {
@@ -1899,14 +1962,14 @@ function scoutMode() {
       labeled("わざ", moveSel),
       el("div", { class: "fav-row2" }, [labeled("攻撃SP", atkSP), labeled("ランク補正", atkRankSel)]),
       labeled("性格補正", atkNature),
-      labeled("とくせい", atkAbilSel),
+      labeled("とくせい", atkAbil.node),
       labeled("持ち物", atkItemSel),
     ]),
     el("section", { class: "card" }, [
       el("h3", {}, "防御側（相手）"),
       labeled("ポケモン", defSel),
       el("div", { class: "fav-row2" }, [labeled("与えたダメージ %", obsInput), labeled("許容誤差 ±%", tolInput)]),
-      labeled("とくせい（分かれば）", defAbilSel),
+      labeled("とくせい（分かれば）", defAbil.node),
       labeled("持ち物（分かれば）", defItemSel),
     ]),
   ]);
@@ -1940,7 +2003,8 @@ function surviveMode() {
   const atkSP = spInput(SP_MAX_PER_STAT, "rv-atk-sp");
   const atkNature = natureTriToggle("up");
   const atkRankSel = rankSelect(render);
-  const atkAbilSel = el("select", { class: "abil-select", onchange: render });
+  const atkAbil = abilityField(render);
+  const atkAbilSel = atkAbil.select;
   const atkItemSel = realItemSelect("atk", render);
 
   // 防御側
@@ -1948,7 +2012,8 @@ function surviveMode() {
   attacker = store.pokemonByName.get(atkSel.value);
   defender = store.pokemonByName.get(defSel.value);
   const defNature = natureTriToggle("neutral");
-  const defAbilSel = el("select", { class: "abil-select", onchange: render });
+  const defAbil = abilityField(render);
+  const defAbilSel = defAbil.select;
   const defItemSel = realItemSelect("def", render);
 
   // 場
@@ -1985,7 +2050,7 @@ function surviveMode() {
       atkSP: clampSPVal(atkSP.value), atkNat: atkNature.get(),
       defNat: defNature.get(),
       atkRank: parseInt(atkRankSel.value, 10) || 0, defRank: 0,
-      atkAbility: atkAbilSel.value, defAbility: defAbilSel.value,
+      atkAbility: atkAbil.value(), defAbility: defAbil.value(),
       atkItem: itemObj(atkItemSel.value), defItem: itemObj(defItemSel.value),
       weather: weatherSel.value, terrain: terrainSel.value, screen: screenSel.value,
       crit: cbCrit.checked, burn: cbBurn.checked, remainPct: 100,
@@ -2007,6 +2072,12 @@ function surviveMode() {
 
     // 現状（固定値そのまま）
     const cur = computeOne(attacker, defender, move, { ...baseCond(), defHpSP: hp, defSP: dv });
+
+    // 相手の特性で無効なら耐え調整は不要。特性を無視できる導線を出す。
+    if (cur.immune && defAbil.value()) {
+      result.replaceChildren(abilityImmuneNotice(defender, defAbil, render, "耐え調整"));
+      return;
+    }
 
     // ① HP固定 → 必要な防御SP最小
     let needDef = null;
@@ -2039,7 +2110,7 @@ function surviveMode() {
       labeled("わざ", moveSel),
       el("div", { class: "fav-row2" }, [labeled("攻撃SP", atkSP), labeled("ランク補正", atkRankSel)]),
       labeled("性格補正", atkNature),
-      labeled("とくせい", atkAbilSel),
+      labeled("とくせい", atkAbil.node),
       labeled("持ち物", atkItemSel),
     ]),
     el("section", { class: "card" }, [
@@ -2047,7 +2118,7 @@ function surviveMode() {
       labeled("ポケモン", defSel),
       labeled("防御の性格補正", defNature),
       el("div", { class: "fav-row2" }, [labeled("固定HP SP", fixHpSP), labeled("固定 防御/特防 SP", fixDefSP)]),
-      labeled("とくせい", defAbilSel),
+      labeled("とくせい", defAbil.node),
       labeled("持ち物", defItemSel),
     ]),
   ]);

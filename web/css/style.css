@@ -412,6 +412,20 @@ details.more .dmg-grid { margin-top: 8px; }
 .recents-empty { font-size: .74rem; }
 .chip-btn { font-size: .76rem; padding: 6px 10px; border-radius: 2px; border: 0; background: var(--surface-2); color: var(--text); cursor: pointer; font-family: inherit; box-shadow: inset 1px 1px 0 0 rgba(127,169,255,.4), inset -1px -1px 0 0 rgba(0,0,0,.5); }
 .chip-btn:hover { background: var(--accent-2); color: #fff; }
+
+/* とくせい select ＋「反映/無視」トグル */
+.abil-field { display: flex; gap: 6px; align-items: stretch; }
+.abil-field .abil-select { flex: 1 1 auto; min-width: 0; }
+.abil-toggle { flex: 0 0 auto; border: 0; cursor: pointer; font-family: inherit; font-size: .74rem; font-weight: 700; padding: 0 11px; border-radius: 2px; background: var(--accent-2); color: #fff; box-shadow: inset 2px 2px 0 0 rgba(255,255,255,.28), inset -2px -2px 0 0 rgba(0,0,0,.4); }
+.abil-toggle.off { background: var(--surface-2); color: var(--dim); box-shadow: inset 2px 2px 0 0 rgba(0,0,0,.4); }
+.abil-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+select.abil-muted { opacity: .5; }
+
+/* 特性で無効になっている時の通知（ワンタップで無視） */
+.dmg-immune-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: rgba(255,107,107,.14); box-shadow: inset 4px 0 0 0 var(--bad); border-radius: 2px; padding: 8px 10px; font-size: .82rem; color: var(--text); }
+.immune-fix { border: 0; cursor: pointer; font-family: inherit; font-size: .78rem; font-weight: 700; padding: 7px 11px; border-radius: 2px; background: var(--bad); color: #2a0e0e; box-shadow: inset 1px 1px 0 rgba(255,255,255,.35), inset -1px -1px 0 rgba(0,0,0,.35); }
+.immune-fix:hover { filter: brightness(1.08); }
+.immune-fix:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .chip-snap { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; line-height: 1.15; text-align: left; }
 .chip-snap .chip-name { font-weight: 700; }
 .chip-snap .chip-sub { color: var(--dim); font-size: .64rem; white-space: nowrap; }
